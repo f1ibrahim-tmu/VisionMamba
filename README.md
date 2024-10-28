@@ -71,6 +71,7 @@ Recently the state space models (SSMs) with efficient hardware-aware designs, i.
 | [Vim-tiny<sup>+</sup>](https://huggingface.co/hustvl/Vim-tiny-midclstok)    |       7M       |   78.3   | 94.2 | https://huggingface.co/hustvl/Vim-tiny-midclstok |
 | [Vim-small](https://huggingface.co/hustvl/Vim-small-midclstok)    |       26M       |   80.5   | 95.1 | https://huggingface.co/hustvl/Vim-small-midclstok |
 | [Vim-small<sup>+</sup>](https://huggingface.co/hustvl/Vim-small-midclstok)    |       26M       |   81.6   | 95.4 | https://huggingface.co/hustvl/Vim-small-midclstok |
+| [Vim-base](https://huggingface.co/hustvl/Vim-base-midclstok)    |       98M       |   81.9   | 95.8 | https://huggingface.co/hustvl/Vim-base-midclstok |
 
 **Notes:**
 - <sup>+</sup> means that we finetune at finer granularity with short schedule.
@@ -86,10 +87,9 @@ This project is based on Mamba ([paper](https://arxiv.org/abs/2312.00752), [code
 If you find Vim is useful in your research or applications, please consider giving us a star 🌟 and citing it by the following BibTeX entry.
 
 ```bibtex
- @article{vim,
+@inproceedings{vim,
   title={Vision Mamba: Efficient Visual Representation Learning with Bidirectional State Space Model},
-  author={Lianghui Zhu and Bencheng Liao and Qian Zhang and Xinlong Wang and Wenyu Liu and Xinggang Wang},
-  journal={arXiv preprint arXiv:2401.09417},
-  year={2024}
+  author={Zhu, Lianghui and Liao, Bencheng and Zhang, Qian and Wang, Xinlong and Liu, Wenyu and Wang, Xinggang},
+  booktitle={Forty-first International Conference on Machine Learning}
 }
 ```
