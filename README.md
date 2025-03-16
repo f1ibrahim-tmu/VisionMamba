@@ -41,12 +41,17 @@ Recently the state space models (SSMs) with efficient hardware-aware designs, i.
 
 ## Envs. for Pretraining
 
-- Python 3.10.13
+- NVIDIA GPUs:
+  - Python 3.10.13
 
-  - `conda create -n your_env_name python=3.10.13`
+    - `conda create -n your_env_name python=3.10.13`
 
-- torch 2.1.1 + cu118
-  - `pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118`
+  - torch 2.1.1 + cu118
+    - `pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118`
+
+- AMD GPUs:
+  - A [Docker image](https://hub.docker.com/r/rocm/pytorch/tags) is recommended, such as `rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.1.2`. For step-by-step instructions, please refer to [Vision Mamba on AMD GPU with ROCm](https://rocm.blogs.amd.com/artificial-intelligence/vision-mamba/README.html#vision-mamba).
+
 
 - Requirements: vim_requirements.txt
   - `pip install -r vim/vim_requirements.txt`
@@ -89,7 +94,7 @@ This project is based on Mamba ([paper](https://arxiv.org/abs/2312.00752), [code
 If you find Vim is useful in your research or applications, please consider giving us a star 🌟 and citing it by the following BibTeX entry.
 
 ```bibtex
-@inproceedings{vim,
+ @inproceedings{vim,
   title={Vision Mamba: Efficient Visual Representation Learning with Bidirectional State Space Model},
   author={Zhu, Lianghui and Liao, Bencheng and Zhang, Qian and Wang, Xinlong and Liu, Wenyu and Wang, Xinggang},
   booktitle={Forty-first International Conference on Machine Learning}
