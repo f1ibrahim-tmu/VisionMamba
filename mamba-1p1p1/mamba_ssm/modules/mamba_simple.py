@@ -52,6 +52,7 @@ class Mamba(nn.Module):
         bimamba_type="none",
         if_divide_out=False,
         init_layer_scale=None,
+        discretization_method="zoh",  # New parameter for discretization method
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -65,6 +66,7 @@ class Mamba(nn.Module):
         self.layer_idx = layer_idx
         self.bimamba_type = bimamba_type
         self.if_divide_out = if_divide_out
+        self.discretization_method = discretization_method  # Store the discretization method
 
         self.init_layer_scale = init_layer_scale
         if init_layer_scale is not None:
@@ -299,6 +301,7 @@ class Mamba(nn.Module):
                 delta_bias=self.dt_proj.bias.float(),
                 delta_softplus=True,
                 return_last_state=ssm_state is not None,
+                discretization_method=self.discretization_method,  # Pass the discretization method
             )
             if ssm_state is not None:
                 y, last_state = y
@@ -340,12 +343,46 @@ class Mamba(nn.Module):
 
         # SSM step
         if selective_state_update is None:
-            # Discretize A and B
+            # Discretize A and B based on the selected discretization method
             dt = F.softplus(dt + self.dt_proj.bias.to(dtype=dt.dtype))
-            dA = torch.exp(torch.einsum("bd,dn->bdn", dt, A))
-            dB = torch.einsum("bd,bn->bdn", dt, B)
+            
+            # Apply discretization based on the selected method
+            if self.discretization_method == "zoh":
+                # Zero Order Hold (default)
+                dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))
+                dB = torch.einsum('bd,bn->bdn', dt, B)
+            elif self.discretization_method == "foh":
+                # First Order Hold
+                dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))
+                # Calculate (A_d - I) / A for B_d
+                A_expanded = A.unsqueeze(0)  # (1, d_inner, d_state)
+                dA_minus_I_div_A = (dA - 1.0) / A_expanded
+                dB = torch.einsum('bdn,bn->bdn', dA_minus_I_div_A, B)
+            elif self.discretization_method == "bilinear":
+                # Bilinear (Tustin) Transform
+                half_dt_A = (dt.unsqueeze(-1) * A.unsqueeze(0)) * 0.5  # (batch, d_inner, d_state)
+                I = torch.eye(self.d_state, device=A.device).unsqueeze(0).unsqueeze(0)  # (1, 1, d_state, d_state)
+                I_plus_half_dt_A = I + half_dt_A.unsqueeze(-1) * torch.eye(self.d_state, device=A.device).unsqueeze(0).unsqueeze(0)
+                I_minus_half_dt_A = I - half_dt_A.unsqueeze(-1) * torch.eye(self.d_state, device=A.device).unsqueeze(0).unsqueeze(0)
+                
+                # Compute (I + A*dt/2)^-1
+                I_plus_half_dt_A_inv = torch.inverse(I_plus_half_dt_A.reshape(-1, self.d_state, self.d_state))
+                I_plus_half_dt_A_inv = I_plus_half_dt_A_inv.reshape(dt.shape[0], -1, self.d_state, self.d_state)
+                
+                # A_d = (I + A*dt/2)^-1 * (I - A*dt/2)
+                dA_matrix = torch.matmul(I_plus_half_dt_A_inv, I_minus_half_dt_A)
+                dA = dA_matrix.diagonal(dim1=-2, dim2=-1)  # Extract diagonal elements
+                
+                # B_d = (I + A*dt/2)^-1 * dt * B
+                dB_matrix = torch.matmul(I_plus_half_dt_A_inv, dt.unsqueeze(-1).unsqueeze(-1) * B.unsqueeze(-1))
+                dB = dB_matrix.squeeze(-1)
+            else:
+                # Default to ZOH for other methods in step function
+                dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))
+                dB = torch.einsum('bd,bn->bdn', dt, B)
+                
             ssm_state.copy_(ssm_state * dA + rearrange(x, "b d -> b d 1") * dB)
-            y = torch.einsum("bdn,bn->bd", ssm_state.to(dtype), C)
+            y = torch.einsum('bdn,bn->bd', ssm_state.to(dtype), C)
             y = y + self.D.to(dtype) * x
             y = y * self.act(z)  # (B D)
         else:

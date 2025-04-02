@@ -155,6 +155,7 @@ def create_block(
     bimamba_type="none",
     if_divide_out=False,
     init_layer_scale=None,
+    discretization_method="zoh",
 ):
     if if_bimamba:
         bimamba_type = "v1"
@@ -162,7 +163,10 @@ def create_block(
         ssm_cfg = {}
     factory_kwargs = {"device": device, "dtype": dtype}
     # import ipdb; ipdb.set_trace()
-    mixer_cls = partial(Mamba, d_state=d_state, layer_idx=layer_idx, bimamba_type=bimamba_type, if_divide_out=if_divide_out, init_layer_scale=init_layer_scale, **ssm_cfg, **factory_kwargs)
+    mixer_cls = partial(Mamba, d_state=d_state, layer_idx=layer_idx, bimamba_type=bimamba_type, 
+                       if_divide_out=if_divide_out, init_layer_scale=init_layer_scale, 
+                       discretization_method=discretization_method,
+                       **ssm_cfg, **factory_kwargs)
     norm_cls = partial(
         nn.LayerNorm if not rms_norm else RMSNorm, eps=norm_epsilon, **factory_kwargs
     )
@@ -261,6 +265,7 @@ class VisionMamba(nn.Module):
                  init_layer_scale=None,
                  use_double_cls_token=False,
                  use_middle_cls_token=True,
+                 discretization_method="zoh",
                  **kwargs):
         factory_kwargs = {"device": device, "dtype": dtype}
         # add factory_kwargs into kwargs
@@ -324,16 +329,18 @@ class VisionMamba(nn.Module):
                     d_state=d_state,
                     ssm_cfg=ssm_cfg,
                     norm_epsilon=norm_epsilon,
+                    drop_path=inter_dpr[i],
                     rms_norm=rms_norm,
                     residual_in_fp32=residual_in_fp32,
                     fused_add_norm=fused_add_norm,
                     layer_idx=i,
-                    if_bimamba=if_bimamba,
+                    device=device,
+                    dtype=dtype,
+                    if_bimamba=if_bidirectional if i > depth//2 else if_bimamba,
                     bimamba_type=bimamba_type,
-                    drop_path=inter_dpr[i],
                     if_divide_out=if_divide_out,
                     init_layer_scale=init_layer_scale,
-                    **factory_kwargs,
+                    discretization_method=discretization_method,
                 )
                 for i in range(depth)
             ]
@@ -615,4 +622,127 @@ def vim_base_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_middle_cls
             map_location="cpu", check_hash=True
         )
         model.load_state_dict(checkpoint["model"])
+    return model
+
+@register_model
+def vim_base_patch16_224_bimambav2_foh(pretrained=False, **kwargs):
+    """
+    ViM-Base with FOH (First Order Hold) discretization
+    """
+    model = VisionMamba(
+        patch_size=16, stride=16, embed_dim=768, depth=12, d_state=16, num_classes=1000, 
+        ssm_cfg={}, 
+        drop_rate=0., 
+        drop_path_rate=0.1,
+        rms_norm=True,
+        initializer_cfg={},
+        residual_in_fp32=True,
+        fused_add_norm=True,
+        final_pool_type='mean',
+        if_abs_pos_embed=True,
+        if_rope=False,
+        if_rope_residual=False,
+        if_cls_token=True,
+        if_divide_out=True,
+        if_bimamba=False,
+        bimamba_type="v2",
+        init_layer_scale=1e-5,
+        # Use First Order Hold discretization instead of ZOH
+        discretization_method="foh",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vim_base_patch16_224_bimambav2_bilinear(pretrained=False, **kwargs):
+    """
+    ViM-Base with Bilinear (Tustin) discretization
+    """
+    model = VisionMamba(
+        patch_size=16, stride=16, embed_dim=768, depth=12, d_state=16, num_classes=1000, 
+        ssm_cfg={}, 
+        drop_rate=0., 
+        drop_path_rate=0.1,
+        rms_norm=True,
+        initializer_cfg={},
+        residual_in_fp32=True,
+        fused_add_norm=True,
+        final_pool_type='mean',
+        if_abs_pos_embed=True,
+        if_rope=False,
+        if_rope_residual=False,
+        if_cls_token=True,
+        if_divide_out=True,
+        if_bimamba=False,
+        bimamba_type="v2",
+        init_layer_scale=1e-5,
+        # Use Bilinear (Tustin) discretization
+        discretization_method="bilinear",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vim_base_patch16_224_bimambav2_poly(pretrained=False, **kwargs):
+    """
+    ViM-Base with Polynomial Interpolation discretization
+    """
+    model = VisionMamba(
+        patch_size=16, stride=16, embed_dim=768, depth=12, d_state=16, num_classes=1000, 
+        ssm_cfg={}, 
+        drop_rate=0., 
+        drop_path_rate=0.1,
+        rms_norm=True,
+        initializer_cfg={},
+        residual_in_fp32=True,
+        fused_add_norm=True,
+        final_pool_type='mean',
+        if_abs_pos_embed=True,
+        if_rope=False,
+        if_rope_residual=False,
+        if_cls_token=True,
+        if_divide_out=True,
+        if_bimamba=False,
+        bimamba_type="v2",
+        init_layer_scale=1e-5,
+        # Use Polynomial Interpolation discretization
+        discretization_method="poly",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vim_base_patch16_224_bimambav2_highorder(pretrained=False, **kwargs):
+    """
+    ViM-Base with Higher-Order Hold discretization
+    """
+    model = VisionMamba(
+        patch_size=16, stride=16, embed_dim=768, depth=12, d_state=16, num_classes=1000, 
+        ssm_cfg={}, 
+        drop_rate=0., 
+        drop_path_rate=0.1,
+        rms_norm=True,
+        initializer_cfg={},
+        residual_in_fp32=True,
+        fused_add_norm=True,
+        final_pool_type='mean',
+        if_abs_pos_embed=True,
+        if_rope=False,
+        if_rope_residual=False,
+        if_cls_token=True,
+        if_divide_out=True,
+        if_bimamba=False,
+        bimamba_type="v2",
+        init_layer_scale=1e-5,
+        # Use Higher-Order Hold discretization
+        discretization_method="highorder",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
     return model
