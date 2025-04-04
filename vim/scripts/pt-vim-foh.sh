@@ -9,6 +9,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --drop-path 0.1 \
     --weight-decay 0.1 \
     --num_workers 25 \
-    --data-path "/Volumes/X10 Pro/datasets/imagenet-1k/train" \
+    --data-path "/data/fady/datasets/imagenet-1k/train" \
     --output_dir ./output/vim_base_foh \
     --no_amp 

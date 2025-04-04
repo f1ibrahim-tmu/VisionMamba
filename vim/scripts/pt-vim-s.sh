@@ -10,4 +10,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --weight-decay 0.05 \
     --lr 1e-3 \
     --num_workers 25 \
-    --data-path <path_to_IN1K_dataset> --output_dir ./output/vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 --no_amp
+    --data-path /data/fady/datasets/imagenet-1k/train \
+    --output_dir ./output/vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
+    --no_amp
