@@ -31,6 +31,7 @@ import utils
 
 # log about
 import mlflow
+from torch.distributed.elastic.multiprocessing.errors import record
 
 
 def get_args_parser():
@@ -218,7 +219,7 @@ def get_args_parser():
     parser.add_argument('--local-rank', default=0, type=int)
     return parser
 
-
+@record
 def main(args):
     utils.init_distributed_mode(args)
 
