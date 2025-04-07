@@ -560,6 +560,66 @@ class VisionMamba(nn.Module):
 
 
 @register_model
+def vim_tiny_patch16_224_bimambav2_foh(pretrained=False, **kwargs):
+    """
+    ViM-Tiny with FOH (First Order Hold) discretization
+    """
+    model = VisionMamba(
+        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
+        # Use First Order Hold discretization instead of ZOH
+        discretization_method="foh",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vim_tiny_patch16_224_bimambav2_bilinear(pretrained=False, **kwargs):
+    """
+    ViM-Tiny with Bilinear (Tustin) discretization
+    """
+    model = VisionMamba(
+        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
+        # Use Bilinear (Tustin) discretization
+        discretization_method="bilinear",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vim_tiny_patch16_224_bimambav2_poly(pretrained=False, **kwargs):
+    """
+    ViM-Tiny with Polynomial Interpolation discretization
+    """
+    model = VisionMamba(
+        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
+        # Use Polynomial Interpolation discretization
+        discretization_method="poly",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vim_tiny_patch16_224_bimambav2_highorder(pretrained=False, **kwargs):
+    """
+    ViM-Tiny with Higher-Order Hold discretization
+    """
+    model = VisionMamba(
+        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
+        # Use Higher-Order Hold discretization
+        discretization_method="highorder",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
 def vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
     model = VisionMamba(
         patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True, **kwargs)

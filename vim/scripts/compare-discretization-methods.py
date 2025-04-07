@@ -20,34 +20,34 @@ from pathlib import Path
 # Import Vision Mamba models
 sys.path.append(str(Path(__file__).parent.parent))
 from models_mamba import (
-    vim_base_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_middle_cls_token_div2,
-    vim_base_patch16_224_bimambav2_foh,
-    vim_base_patch16_224_bimambav2_bilinear,
-    vim_base_patch16_224_bimambav2_poly,
-    vim_base_patch16_224_bimambav2_highorder,
+    vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2,
+    vim_tiny_patch16_224_bimambav2_foh,
+    vim_tiny_patch16_224_bimambav2_bilinear,
+    vim_tiny_patch16_224_bimambav2_poly,
+    vim_tiny_patch16_224_bimambav2_highorder,
 )
 
 # Model configurations for each discretization method
 MODEL_CONFIGS = {
     "ZOH (Default)": {
-        "model_fn": vim_base_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_middle_cls_token_div2,
-        "checkpoint_path": "output/vim_base_zoh/checkpoint_best.pth",
+        "model_fn": vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2,
+        "checkpoint_path": "output/vim_tiny_zoh/checkpoint_best.pth",
     },
     "First Order Hold (FOH)": {
-        "model_fn": vim_base_patch16_224_bimambav2_foh,
-        "checkpoint_path": "output/vim_base_foh/checkpoint_best.pth",
+        "model_fn": vim_tiny_patch16_224_bimambav2_foh,
+        "checkpoint_path": "output/vim_tiny_foh/checkpoint_best.pth",
     },
     "Bilinear (Tustin)": {
-        "model_fn": vim_base_patch16_224_bimambav2_bilinear,
-        "checkpoint_path": "output/vim_base_bilinear/checkpoint_best.pth",
+        "model_fn": vim_tiny_patch16_224_bimambav2_bilinear,
+        "checkpoint_path": "output/vim_tiny_bilinear/checkpoint_best.pth",
     },
     "Polynomial Interpolation": {
-        "model_fn": vim_base_patch16_224_bimambav2_poly,
-        "checkpoint_path": "output/vim_base_poly/checkpoint_best.pth",
+        "model_fn": vim_tiny_patch16_224_bimambav2_poly,
+        "checkpoint_path": "output/vim_tiny_poly/checkpoint_best.pth",
     },
     "Higher-Order Hold": {
-        "model_fn": vim_base_patch16_224_bimambav2_highorder,
-        "checkpoint_path": "output/vim_base_highorder/checkpoint_best.pth",
+        "model_fn": vim_tiny_patch16_224_bimambav2_highorder,
+        "checkpoint_path": "output/vim_tiny_highorder/checkpoint_best.pth",
     },
 }
 
@@ -55,7 +55,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser(description='Vision Mamba Discretization Methods Comparison', add_help=False)
     parser.add_argument('--data-path', default='/Volumes/X10 Pro/datasets/imagenet-1k/validation', type=str, help='validation dataset path')
     parser.add_argument('--batch-size', default=64, type=int, help='batch size for evaluation')
-    parser.add_argument('--workers', default=8, type=int, help='number of data loading workers')
+    parser.add_argument('--workers', default=0, type=int, help='number of data loading workers')
     parser.add_argument('--output', default='./comparison_results', type=str, help='output directory for results')
     return parser
 
