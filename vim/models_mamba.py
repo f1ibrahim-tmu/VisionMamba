@@ -565,7 +565,10 @@ def vim_tiny_patch16_224_bimambav2_foh(pretrained=False, **kwargs):
     ViM-Tiny with FOH (First Order Hold) discretization
     """
     model = VisionMamba(
-        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
+        patch_size=16, 
+        embed_dim=192, 
+        depth=24, 
+        rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
         # Use First Order Hold discretization instead of ZOH
         discretization_method="foh",
         **kwargs
