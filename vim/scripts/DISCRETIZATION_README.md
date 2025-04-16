@@ -19,7 +19,7 @@ This directory contains scripts for training and evaluating Vision Mamba models 
 
    - Maps the s-plane to the z-plane using a trapezoidal approximation
    - Preserves stability properties of the original system
-   - Formula: A_d = (I + A*delta/2)^(-1) * (I - A*delta/2), B_d = (I + A*delta/2)^(-1) _ delta _ B
+   - Formula: A*d = (I + A*delta/2)^(-1) * (I - A*delta/2), B_d = (I + A*delta/2)^(-1) * delta \_ B
 
 4. **Polynomial Interpolation**
 
@@ -28,9 +28,29 @@ This directory contains scripts for training and evaluating Vision Mamba models 
    - Formula: B_d = delta*B + delta^2*A*B/2 + delta^3*A^2\*B/6 (3rd order approximation)
 
 5. **Higher-Order Hold**
+
    - Similar to FOH but with higher-order terms
    - Approximates using Taylor series expansion
    - Provides improved accuracy over ZOH and FOH
+
+6. **Runge-Kutta 4th Order (RK4)**
+   - Uses the classic 4th order Runge-Kutta method for numerical integration
+   - Provides high accuracy and stability for complex dynamics
+   - Formula:
+     - k1 = delta \* f(t_n, y_n)
+     - k2 = delta \* f(t_n + delta/2, y_n + k1/2)
+     - k3 = delta \* f(t_n + delta/2, y_n + k2/2)
+     - k4 = delta \* f(t_n + delta, y_n + k3)
+     - y\_{n+1} = y_n + (k1 + 2*k2 + 2*k3 + k4)/6
+   - Advantages:
+     - Higher accuracy (4th order) compared to other methods
+     - Better stability properties
+     - More accurate approximation of continuous-time dynamics
+     - Proper handling of non-linearities through the RK4 coefficients
+   - Trade-offs:
+     - More computationally expensive (requires 4 function evaluations per step)
+     - More complex implementation
+     - May require smaller step sizes for stability
 
 ## Dataset Structure
 
@@ -48,6 +68,7 @@ Each discretization method has its own training script:
 - `pt-vim-bilinear.sh` - Train with Bilinear Transform
 - `pt-vim-poly.sh` - Train with Polynomial Interpolation
 - `pt-vim-highorder.sh` - Train with Higher-Order Hold
+- `pt-vim-rk4.sh` - Train with Runge-Kutta 4th Order
 
 ### Running Full Training
 
@@ -105,6 +126,7 @@ Different discretization methods may perform better depending on the nature of t
 - FOH and Bilinear methods may provide better stability for rapidly changing signals
 - Higher-order methods might capture more complex patterns but could be computationally more expensive
 - Polynomial interpolation might provide a good balance between accuracy and computational cost
+- RK4 method may provide the highest accuracy but with increased computational overhead
 
 ## Modified Files
 

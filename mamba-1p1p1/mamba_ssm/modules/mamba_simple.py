@@ -376,6 +376,73 @@ class Mamba(nn.Module):
                 # B_d = (I + A*dt/2)^-1 * dt * B
                 dB_matrix = torch.matmul(I_plus_half_dt_A_inv, dt.unsqueeze(-1).unsqueeze(-1) * B.unsqueeze(-1))
                 dB = dB_matrix.squeeze(-1)
+            elif self.discretization_method == "rk4":
+                # Runge-Kutta 4th Order
+                # Calculate A^2 and A^3 for RK4 coefficients
+                A2 = torch.einsum('dn,dk->dnk', A, A)
+                A3 = torch.einsum('dnk,dk->dnk', A2, A)
+                
+                # Calculate delta powers for RK4 coefficients
+                dt2 = dt.unsqueeze(-1) * dt.unsqueeze(-1) / 2
+                dt3 = dt.unsqueeze(-1) * dt2 / 3
+                dt4 = dt.unsqueeze(-1) * dt3 / 4
+                
+                # Calculate RK4 coefficients for A
+                k1_A = torch.einsum('bd,dn->bdn', dt, A)
+                k2_A = torch.einsum('bd,dn->bdn', dt/2, A + torch.einsum('bdn,dn->bdn', k1_A/2, A))
+                k3_A = torch.einsum('bd,dn->bdn', dt/2, A + torch.einsum('bdn,dn->bdn', k2_A/2, A))
+                k4_A = torch.einsum('bd,dn->bdn', dt, A + torch.einsum('bdn,dn->bdn', k3_A, A))
+                
+                # Calculate RK4 coefficients for B
+                k1_B = torch.einsum('bd,bn->bdn', dt, B)
+                k2_B = torch.einsum('bd,bn->bdn', dt/2, B + torch.einsum('bdn,dn->bdn', k1_B/2, A))
+                k3_B = torch.einsum('bd,bn->bdn', dt/2, B + torch.einsum('bdn,dn->bdn', k2_B/2, A))
+                k4_B = torch.einsum('bd,bn->bdn', dt, B + torch.einsum('bdn,dn->bdn', k3_B, A))
+                
+                # Combine RK4 coefficients
+                dA = (k1_A + 2*k2_A + 2*k3_A + k4_A) / 6
+                dB = (k1_B + 2*k2_B + 2*k3_B + k4_B) / 6
+            elif self.discretization_method == "poly":
+                # Polynomial Interpolation (3rd order)
+                # Calculate A^2 and A^3 for polynomial terms
+                A2 = torch.einsum('dn,dk->dnk', A, A)
+                A3 = torch.einsum('dnk,dk->dnk', A2, A)
+                
+                # Calculate delta powers
+                dt2 = dt.unsqueeze(-1) * dt.unsqueeze(-1) / 2
+                dt3 = dt.unsqueeze(-1) * dt2 / 6
+                
+                # Calculate polynomial terms for A
+                dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))
+                
+                # Calculate polynomial terms for B
+                # B_d = delta*B + delta^2*A*B/2 + delta^3*A^2*B/6
+                term1 = torch.einsum('bd,bn->bdn', dt, B)
+                term2 = torch.einsum('bdn,bn->bdn', dt2, torch.einsum('dnk,bk->bdn', A, B))
+                term3 = torch.einsum('bdn,bn->bdn', dt3, torch.einsum('dnk,bk->bdn', A2, B))
+                dB = term1 + term2 + term3
+            elif self.discretization_method == "highorder":
+                # Higher-Order Hold (4th order Taylor series)
+                # Calculate A^2, A^3, and A^4 for higher-order terms
+                A2 = torch.einsum('dn,dk->dnk', A, A)
+                A3 = torch.einsum('dnk,dk->dnk', A2, A)
+                A4 = torch.einsum('dnk,dk->dnk', A3, A)
+                
+                # Calculate delta powers
+                dt2 = dt.unsqueeze(-1) * dt.unsqueeze(-1) / 2
+                dt3 = dt.unsqueeze(-1) * dt2 / 6
+                dt4 = dt.unsqueeze(-1) * dt3 / 24
+                
+                # Calculate higher-order terms for A
+                dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))
+                
+                # Calculate higher-order terms for B
+                # B_d = delta*B + delta^2*A*B/2 + delta^3*A^2*B/6 + delta^4*A^3*B/24
+                term1 = torch.einsum('bd,bn->bdn', dt, B)
+                term2 = torch.einsum('bdn,bn->bdn', dt2, torch.einsum('dnk,bk->bdn', A, B))
+                term3 = torch.einsum('bdn,bn->bdn', dt3, torch.einsum('dnk,bk->bdn', A2, B))
+                term4 = torch.einsum('bdn,bn->bdn', dt4, torch.einsum('dnk,bk->bdn', A3, B))
+                dB = term1 + term2 + term3 + term4
             else:
                 # Default to ZOH for other methods in step function
                 dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))

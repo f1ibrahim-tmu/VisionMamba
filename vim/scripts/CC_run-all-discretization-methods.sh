@@ -16,4 +16,7 @@ bash ./scripts/CC_pt-vim-poly.sh
 echo "Running Higher-Order Hold training..."
 bash ./scripts/CC_pt-vim-highorder.sh
 
+echo "Running Runge-Kutta 4th Order (RK4) training..."
+bash ./scripts/CC_pt-vim-rk4.sh
+
 echo "All training runs completed!" 
