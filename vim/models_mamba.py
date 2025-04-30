@@ -621,6 +621,19 @@ def vim_tiny_patch16_224_bimambav2_highorder(pretrained=False, **kwargs):
     model.default_cfg = _cfg()
     return model
 
+@register_model
+def vim_tiny_patch16_224_bimambav2_rk4(pretrained=False, **kwargs):
+    """
+    ViM-Tiny with Runge-Kutta 4th Order discretization
+    """
+    model = VisionMamba(
+        patch_size=16, embed_dim=192, depth=24, rms_norm=True, residual_in_fp32=True, fused_add_norm=True, final_pool_type='mean', if_abs_pos_embed=True, if_rope=False, if_rope_residual=False, bimamba_type="v2", if_cls_token=True, if_divide_out=True, use_middle_cls_token=True,
+        # Use Runge-Kutta 4th Order discretization
+        discretization_method="rk4",
+        **kwargs
+    )
+    model.default_cfg = _cfg()
+    return model
 
 @register_model
 def vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2(pretrained=False, **kwargs):
@@ -805,36 +818,6 @@ def vim_base_patch16_224_bimambav2_highorder(pretrained=False, **kwargs):
         init_layer_scale=1e-5,
         # Use Higher-Order Hold discretization
         discretization_method="highorder",
-        **kwargs
-    )
-    model.default_cfg = _cfg()
-    return model
-
-@register_model
-def vim_tiny_patch16_224_bimambav2_rk4(pretrained=False, **kwargs):
-    """
-    ViM-Tiny with Runge-Kutta 4th Order discretization
-    """
-    model = VisionMamba(
-        patch_size=16, stride=16, embed_dim=768, depth=12, d_state=16, num_classes=1000,
-        ssm_cfg={}, 
-        drop_rate=0., 
-        drop_path_rate=0.1,
-        rms_norm=True,
-        initializer_cfg={},
-        residual_in_fp32=True,
-        fused_add_norm=True,
-        final_pool_type='mean',
-        if_abs_pos_embed=True,
-        if_rope=False,
-        if_rope_residual=False,
-        if_cls_token=True,
-        if_divide_out=True,
-        if_bimamba=False,
-        bimamba_type="v2",
-        init_layer_scale=1e-5,
-        # Use Runge-Kutta 4th Order discretization
-        discretization_method="rk4",
         **kwargs
     )
     model.default_cfg = _cfg()
