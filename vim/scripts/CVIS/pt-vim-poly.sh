@@ -3,7 +3,11 @@
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
 
-CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 ./vim/main.py \
+CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
+    --rdzv-backend=c10d \
+    --rdzv-endpoint=localhost:0 \
+    --master_port=0 \
+    ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_poly \
     --batch-size 128 \
     --drop-path 0.0 \
