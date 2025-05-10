@@ -14,8 +14,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --weight-decay 0.1 \
     --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
-    --output_dir ./output/vim_tiny_highorder \
-    --amp
+    --output_dir ./output/vim_tiny_highorder
 
 # GPU stats every 8 hours to file
 watch -n 28800 -t 'nvidia-smi >> ./output/vim_tiny_highorder_gpu.log'
