@@ -11,5 +11,4 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     --weight-decay 0.1 \
     --num_workers 0 \
     --data-path /home/f7ibrahi/projects/def-wangcs/dataset/ImageNet/ILSVRC2012 \
-    --output_dir ./output/vim_tiny_foh \
-    --amp
+    --output_dir ./output/vim_tiny_foh
