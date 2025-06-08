@@ -7,6 +7,7 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import json
+import os
 
 from pathlib import Path
 
@@ -440,28 +441,31 @@ def main(args):
 
     output_dir = Path(args.output_dir)
     if args.resume:
-        if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
+        if os.path.exists(args.resume):
+            if args.resume.startswith('https'):
+                checkpoint = torch.hub.load_state_dict_from_url(
+                    args.resume, map_location='cpu', check_hash=True)
+            else:
+                checkpoint = torch.load(args.resume, map_location='cpu')
+            model_without_ddp.load_state_dict(checkpoint['model'])
 
-        # add ema load
-        if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
+            # add ema load
             if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-            if 'scaler' in checkpoint and args.if_amp: # change loss_scaler if not amp
-                loss_scaler.load_state_dict(checkpoint['scaler'])
-            elif 'scaler' in checkpoint and not args.if_amp:
-                loss_scaler = 'none'
-        lr_scheduler.step(args.start_epoch)
+                    utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+
+            if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+                args.start_epoch = checkpoint['epoch'] + 1
+                if args.model_ema:
+                    utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+                if 'scaler' in checkpoint and args.if_amp: # change loss_scaler if not amp
+                    loss_scaler.load_state_dict(checkpoint['scaler'])
+                elif 'scaler' in checkpoint and not args.if_amp:
+                    loss_scaler = 'none'
+            lr_scheduler.step(args.start_epoch)
+        else:
+            print(f"Warning: Checkpoint file {args.resume} not found. Starting from scratch.")
         
     if args.eval:
         test_stats = evaluate(data_loader_val, model, device, amp_autocast)

@@ -14,4 +14,5 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --weight-decay 0.1 \
     --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
-    --output_dir ./output/vim_tiny_bilinear
+    --output_dir ./output/vim_tiny_bilinear \
+    --resume ./output/vim_tiny_bilinear/checkpoint.pth
