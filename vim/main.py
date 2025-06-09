@@ -464,6 +464,15 @@ def main(args):
                 elif 'scaler' in checkpoint and not args.if_amp:
                     loss_scaler = 'none'
             lr_scheduler.step(args.start_epoch)
+            
+            # Add debug prints
+            print("\n=== Checkpoint Loading Debug Info ===")
+            print(f"Learning rate after resume: {optimizer.param_groups[0]['lr']}")
+            print(f"Model training mode: {model.training}")
+            if model_ema is not None:
+                print(f"EMA model training mode: {model_ema.ema.training}")
+            print(f"Starting from epoch: {args.start_epoch}")
+            print("===================================\n")
         else:
             print(f"Warning: Checkpoint file {args.resume} not found. Starting from scratch.")
         
