@@ -14,7 +14,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --np
     --weight-decay 0.05 \
     --lr 0.001 \
     --num_workers 0 \
-    --input-size 32 32 \
+    --input-size 32 \
     --data-set CIFAR \
     --data-path /data/fady/datasets/cifar100/cifar-100-python \
     --output_dir ./output/cifar100/vim_tiny_bilinear \
