@@ -1,0 +1,28 @@
+# Compute Canada only requirements - no external downloads
+# Uses only packages available in Compute Canada repositories
+
+# Core dependencies (use Compute Canada versions)
+einops
+timm
+transformers
+triton
+
+# Data processing (use Compute Canada versions)
+# numpy - already available in Compute Canada
+# opencv-python - use Compute Canada version or skip
+Pillow
+
+# Utilities (use Compute Canada versions)
+tqdm
+PyYAML
+requests
+
+# Optional but recommended (use Compute Canada versions)
+matplotlib
+scikit-learn
+scipy
+
+# Note: All packages should use Compute Canada versions to avoid network issues
+# Note: PyTorch, mamba-ssm, and causal-conv1d should be installed separately
+
+
