@@ -2,7 +2,7 @@
 # Runge-Kutta 4th Order (RK4) discretization for Vision Mamba detection on MS-COCO
 
 # Set COCO dataset path
-export DETECTRON2_DATASETS=/home/f7ibrahi/links/scratch/dataset
+export DETECTRON2_DATASETS=/home/f7ibrahi/scratch/dataset
 
 # Activate environment (adjust path as needed)
 # source /path/to/your/conda/bin/activate det2

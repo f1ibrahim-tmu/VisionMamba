@@ -2,7 +2,7 @@
 # This script runs training for all discretization methods on MS-COCO object detection
 
 # Set COCO dataset path
-export DETECTRON2_DATASETS=/home/f7ibrahi/links/scratch/dataset
+export DETECTRON2_DATASETS=/home/f7ibrahi/scratch/dataset
 
 echo "=========================================="
 echo "Running Vision Mamba Discretization Experiments"
