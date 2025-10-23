@@ -1,15 +1,11 @@
 #!/bin/bash
 # Polynomial Interpolation discretization for Vision Mamba detection on MS-COCO
 
-# Activate environment (adjust path as needed)
-# source /path/to/your/conda/bin/activate det2
-# cd /path/to/VisionMamba/det
-
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_poly
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
-    tools/lazyconfig_train_net.py \
+    /det/tools/lazyconfig_train_net.py \
     --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \
     --config-file ${DET_CONFIG} \
     train.output_dir=work_dirs/${DET_CONFIG_NAME}-4gpu \
