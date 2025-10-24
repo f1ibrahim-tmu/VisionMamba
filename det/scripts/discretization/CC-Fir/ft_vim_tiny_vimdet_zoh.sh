@@ -5,7 +5,7 @@ DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
-    ./det/tools/lazyconfig_train_net.py \
+    det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     train.output_dir=work_dirs/${DET_CONFIG_NAME}-4gpu \
     dataloader.train.num_workers=128 \
