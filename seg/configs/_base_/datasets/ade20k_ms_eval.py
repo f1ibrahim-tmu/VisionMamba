@@ -1,6 +1,6 @@
 # dataset settings
 dataset_type = 'ADE20KDataset'
-data_root = '/home/f7ibrahi/links/scratch' # HPC folder of datasets
+data_root = '/home/f7ibrahi/scratch' # HPC folder of datasets
 data_path = '/dataset/ade20k/ADEChallengeData2016'
 data_total = data_root + data_path
 img_norm_cfg = dict(
