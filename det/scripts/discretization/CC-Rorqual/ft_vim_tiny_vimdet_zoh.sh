@@ -1,11 +1,14 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba detection on MS-COCO
 
+# Change to det directory
+cd /lustre09/project/6062393/f7ibrahi/projects/VisionMamba/det
+
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
-    det/tools/lazyconfig_train_net.py \
+    tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     train.output_dir=work_dirs/${DET_CONFIG_NAME}-4gpu \
     dataloader.train.num_workers=128 \
