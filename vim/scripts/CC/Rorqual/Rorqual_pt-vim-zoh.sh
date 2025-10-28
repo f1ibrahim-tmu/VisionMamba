@@ -14,5 +14,5 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --input-size 32 \
     --data-set CIFAR \
     --data-path /home/f7ibrahi/links/scratch/dataset/cifar100 \
-    --output_dir ./output/vim_tiny_zoh \
-    --resume ./output/vim_tiny_zoh/checkpoint.pth
+    --output_dir ./output/classification_logs/vim_tiny_zoh \
+    --resume ./output/classification_logs/vim_tiny_zoh/checkpoint.pth
