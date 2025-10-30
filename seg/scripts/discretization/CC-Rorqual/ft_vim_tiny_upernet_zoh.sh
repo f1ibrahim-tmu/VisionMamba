@@ -14,4 +14,6 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \
              optimizer.lr=0.001 \
-             optimizer.weight_decay=0.05
+             optimizer.weight_decay=0.05 \
+    --output_dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
+    --resume ./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh/checkpoint.pth
