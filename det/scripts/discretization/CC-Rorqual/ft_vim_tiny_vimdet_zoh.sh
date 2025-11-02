@@ -5,6 +5,7 @@
 # cd /lustre09/project/6062393/f7ibrahi/projects/VisionMamba/det
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
+# Script now auto-detects whether running from root or det/ directory
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \

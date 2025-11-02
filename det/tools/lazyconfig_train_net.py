@@ -105,7 +105,28 @@ def do_train(args, cfg):
 
 
 def main(args):
-    cfg = LazyConfig.load(args.config_file)
+    # If running from project root and config path doesn't start with det/,
+    # try to find it in det/projects/ first
+    import os
+    config_file = args.config_file
+    if not os.path.isabs(config_file) and not config_file.startswith("det/"):
+        # Check if we're in project root (current dir has det/ subdirectory)
+        cwd = os.getcwd()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Get project root: script is at det/tools/lazyconfig_train_net.py
+        project_root = os.path.dirname(os.path.dirname(script_dir))
+        
+        # If current working directory is project root, and config path starts with projects/
+        if cwd == project_root and config_file.startswith("projects/"):
+            # Try det/projects/ path first
+            det_config_path = os.path.join(project_root, "det", config_file)
+            if os.path.exists(det_config_path):
+                config_file = os.path.join("det", config_file)
+        # If current working directory is det/, keep original path
+        elif os.path.basename(cwd) == "det" and config_file.startswith("projects/"):
+            # Already correct, keep as is
+            pass
+    cfg = LazyConfig.load(config_file)
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     default_setup(cfg, args)
 
