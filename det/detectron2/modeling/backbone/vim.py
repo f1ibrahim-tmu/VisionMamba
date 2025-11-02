@@ -21,8 +21,9 @@ from .vit import SimpleFeaturePyramid
 # add the root path to the system path
 import sys, os
 # Get the project root by going up from current file: det/detectron2/modeling/backbone/vim.py -> project root
+# Need 4 dirnames: backbone -> modeling -> detectron2 -> det -> project root
 _current_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_current_dir)))))
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_current_dir))))
 _vim_path = os.path.join(_project_root, 'vim')
 if _vim_path not in sys.path:
     sys.path.insert(0, _vim_path)
