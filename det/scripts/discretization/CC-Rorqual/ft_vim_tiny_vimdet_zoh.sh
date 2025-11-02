@@ -15,6 +15,6 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     dataloader.train.num_workers=128 \
     dataloader.test.num_workers=8 \
     model.backbone.discretization_method=zoh \
-    --resume train.init_checkpoint=./output/detection_logs/vim_tiny_vimdet_zoh/checkpoint.pth
+    train.init_checkpoint=./output/detection_logs/vim_tiny_vimdet_zoh/checkpoint.pth
 
     # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \

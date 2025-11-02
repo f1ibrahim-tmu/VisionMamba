@@ -20,4 +20,4 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     dataloader.train.num_workers=128 \
     dataloader.test.num_workers=8 \
     model.backbone.discretization_method=foh \
-    --resume train.init_checkpoint=./output/detection_logs/vim_tiny_vimdet_foh/checkpoint.pth
+    train.init_checkpoint=./output/detection_logs/vim_tiny_vimdet_foh/checkpoint.pth
