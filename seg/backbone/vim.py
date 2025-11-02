@@ -13,9 +13,12 @@ from mmseg.models.builder import BACKBONES
 
 # add the root path to the system path
 import sys, os
-print(os.path.dirname(os.getcwd()) + "/vim")
-# import the parent directory of the current cwd
-sys.path.append(os.path.dirname(os.getcwd()) + "/vim")
+# Get the project root by going up from current file: seg/backbone/vim.py -> project root
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(os.path.dirname(_current_dir))
+_vim_path = os.path.join(_project_root, 'vim')
+if _vim_path not in sys.path:
+    sys.path.insert(0, _vim_path)
 from models_mamba import VisionMamba, layer_norm_fn, rms_norm_fn, RMSNorm
 from utils import interpolate_pos_embed
 
