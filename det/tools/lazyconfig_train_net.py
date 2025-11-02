@@ -126,6 +126,9 @@ def main(args):
         elif os.path.basename(cwd) == "det" and config_file.startswith("projects/"):
             # Already correct, keep as is
             pass
+    
+    # Update args.config_file so default_setup can find it
+    args.config_file = config_file
     cfg = LazyConfig.load(config_file)
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     default_setup(cfg, args)
