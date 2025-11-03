@@ -244,20 +244,70 @@ def interpolate_pos_embed(model, state_dict):
     embedding_size = pos_embed_checkpoint.shape[-1]
     num_patches = model.patch_embed.num_patches
     num_extra_tokens = model.pos_embed.shape[-2] - num_patches
+    
+    # Calculate number of extra tokens in checkpoint (may differ from model)
+    checkpoint_num_tokens = pos_embed_checkpoint.shape[-2]
+    
+    # Try to infer number of extra tokens in checkpoint by finding a perfect square
+    # Try removing 0, 1, 2, etc. extra tokens to find a perfect square
+    num_extra_tokens_checkpoint = num_extra_tokens  # Default to model's value
+    checkpoint_num_patches = checkpoint_num_tokens - num_extra_tokens_checkpoint
+    checkpoint_sqrt = int(checkpoint_num_patches ** 0.5)
+    
+    # If initial assumption doesn't give a perfect square, try to find it
+    if checkpoint_sqrt * checkpoint_sqrt != checkpoint_num_patches:
+        # Checkpoint might have different number of extra tokens, try to infer
+        # Try removing 0, 1, 2, 3 extra tokens to find a perfect square
+        for extra in range(0, min(4, checkpoint_num_tokens)):
+            test_patches = checkpoint_num_tokens - extra
+            test_sqrt = int(test_patches ** 0.5)
+            if test_sqrt * test_sqrt == test_patches:
+                num_extra_tokens_checkpoint = extra
+                checkpoint_num_patches = test_patches
+                break
+    
     # import ipdb; ipdb.set_trace()
     # height (== width) for the checkpoint position embedding
-    orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+    orig_size = int(checkpoint_num_patches ** 0.5)
     # height (== width) for the new position embedding
     new_size = int(num_patches ** 0.5)
+    
+    # Handle extra tokens difference even if sizes are the same
+    needs_extra_token_adjustment = (num_extra_tokens_checkpoint != num_extra_tokens)
+    
     # class_token and dist_token are kept unchanged
-    if orig_size != new_size:
-        print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
-        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+    if orig_size != new_size or needs_extra_token_adjustment:
+        if orig_size != new_size:
+            print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens_checkpoint]
         # only the position tokens are interpolated
-        pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-        pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-        pos_tokens = torch.nn.functional.interpolate(
-            pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
-        pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-        new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+        pos_tokens = pos_embed_checkpoint[:, num_extra_tokens_checkpoint:]
+        
+        if orig_size != new_size:
+            pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+            pos_tokens = torch.nn.functional.interpolate(
+                pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+            pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+        else:
+            # No interpolation needed, just reshape if needed
+            pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size)
+            pos_tokens = pos_tokens.reshape(-1, new_size * new_size, embedding_size)
+        
+        # Only concatenate extra tokens if model expects them
+        if num_extra_tokens > 0:
+            # If checkpoint has fewer extra tokens, pad with zeros
+            if num_extra_tokens_checkpoint < num_extra_tokens:
+                extra_padding = torch.zeros(
+                    (1, num_extra_tokens - num_extra_tokens_checkpoint, embedding_size),
+                    dtype=extra_tokens.dtype, device=extra_tokens.device
+                )
+                extra_tokens = torch.cat((extra_tokens, extra_padding), dim=1)
+            # If checkpoint has more extra tokens, take only the first num_extra_tokens
+            elif num_extra_tokens_checkpoint > num_extra_tokens:
+                extra_tokens = extra_tokens[:, :num_extra_tokens]
+            new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+        else:
+            # Model doesn't expect extra tokens, use only interpolated position tokens
+            new_pos_embed = pos_tokens
+        
         state_dict['pos_embed'] = new_pos_embed
