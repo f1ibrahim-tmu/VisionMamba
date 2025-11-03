@@ -234,6 +234,14 @@ def init_distributed_mode(args):
         args.rank, args.dist_url), flush=True)
     torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                          world_size=args.world_size, rank=args.rank)
+    
+    # Add CUDA synchronization and small delay before barrier to avoid Bus errors
+    # Bus errors can occur with memory-intensive operations (e.g., RK4 discretization)
+    # due to memory alignment issues during distributed synchronization
+    torch.cuda.synchronize()
+    import time
+    time.sleep(0.1)
+    
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
 

@@ -15,7 +15,7 @@ export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
 # Use a slightly smaller batch size for RK4 to reduce memory pressure
 # RK4 is more memory-intensive due to its 4-stage computations
-BATCH_SIZE=96  # Reduced from 128 to avoid memory issues
+BATCH_SIZE=32  # Reduced from 128 to avoid memory issues
 
 OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     --rdzv-backend=c10d \
@@ -23,7 +23,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run 
     --master_port=0 \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_rk4 \
-    --batch-size ${BATCH_SIZE} \
+    --batch-size 32 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
