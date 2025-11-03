@@ -4,6 +4,16 @@
 SEG_CONFIG=configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=/data/fady/projects/VisionMamba/output/vim_tiny_zoh/best_checkpoint.pth
 
+# Conditionally set resume checkpoint if it exists
+CHECKPOINT_PATH=output/segmentation_logs/vim_tiny_vimseg_upernet_zoh/checkpoint.pth
+RESUME_ARG=""
+if [ -f "${CHECKPOINT_PATH}" ]; then
+    RESUME_ARG="--resume ${CHECKPOINT_PATH}"
+    echo "Found checkpoint at ${CHECKPOINT_PATH}, will resume training from it."
+else
+    echo "No checkpoint found at ${CHECKPOINT_PATH}, starting training from scratch."
+fi
+
 OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
@@ -18,4 +28,4 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --np
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
     --output_dir output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
-    --resume output/segmentation_logs/vim_tiny_vimseg_upernet_zoh/checkpoint.pth
+    ${RESUME_ARG}

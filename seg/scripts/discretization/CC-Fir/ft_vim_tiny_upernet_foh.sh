@@ -15,6 +15,5 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
              model.backbone.discretization_method=foh \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
-    --output_dir output/segmentation_logs/vim_tiny_vimseg_upernet_foh \
-    --resume output/segmentation_logs/vim_tiny_vimseg_upernet_foh/checkpoint.pth
+    --output_dir output/segmentation_logs/vim_tiny_vimseg_upernet_foh
 
