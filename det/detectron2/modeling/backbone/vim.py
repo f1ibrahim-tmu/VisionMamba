@@ -116,9 +116,12 @@ class VisionMambaDet(VisionMamba, Backbone):
             state_dict_model = state_dict["model"]
             state_dict_model.pop("head.weight")
             state_dict_model.pop("head.bias")
-            # pop rope
-            state_dict_model.pop("rope.freqs_cos")
-            state_dict_model.pop("rope.freqs_sin")
+            # pop rope if it exists
+            try:
+                state_dict_model.pop("rope.freqs_cos")
+                state_dict_model.pop("rope.freqs_sin")
+            except KeyError:
+                logger.info("No rope parameters in pretrained model, skipping removal")
 
             if self.patch_embed.patch_size[-1] != state_dict["model"]["patch_embed.proj.weight"].shape[-1]:
                 state_dict_model.pop("patch_embed.proj.weight")
