@@ -96,7 +96,19 @@ class VisionMambaDet(VisionMamba, Backbone):
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
 
-        if isinstance(pretrained, str):
+        if isinstance(pretrained, str) and pretrained:
+            # Check if path is a placeholder or doesn't exist
+            import os
+            is_placeholder = "/path/to" in pretrained or not os.path.exists(pretrained)
+            if is_placeholder:
+                logger = logging.getLogger(__name__)
+                if "/path/to" in pretrained:
+                    logger.warning(f"Pretrained path is a placeholder: {pretrained}. Skipping pretrained weight loading and using random initialization.")
+                else:
+                    logger.warning(f"Pretrained file not found: {pretrained}. Skipping pretrained weight loading and using random initialization.")
+                self.apply(_init_weights)
+                return
+            
             self.apply(_init_weights)
             logger = logging.getLogger(__name__)
 
