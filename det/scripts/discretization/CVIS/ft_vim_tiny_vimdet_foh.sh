@@ -13,5 +13,5 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --np
     --output_dir ./output/detection_logs/vim_tiny_vimdet_foh \
     dataloader.train.num_workers=128 \
     dataloader.test.num_workers=8 \
-    model.backbone.discretization_method=foh \
+    model.backbone.net.discretization_method=foh \
     train.init_checkpoint=./output/detection_logs/vim_tiny_vimdet_foh/checkpoint.pth
