@@ -1,25 +1,14 @@
 #!/bin/bash
 # First Order Hold (FOH) discretization for Vision Mamba detection on MS-COCO
 
-# Change to det directory
-# cd /lustre09/project/6062393/f7ibrahi/projects/VisionMamba/det
-
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_foh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
-## CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
-##     ./det/tools/lazyconfig_train_net.py \
-##     --config-file ${DET_CONFIG} \
-##     train.output_dir=work_dirs/${DET_CONFIG_NAME}-4gpu \
-##     dataloader.train.num_workers=128 \
-##     dataloader.test.num_workers=8 \
-##     model.backbone.discretization_method=foh
-##     # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \
-
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
+CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
-    --output_dir ./output/detection_logs/vim_tiny_vimdet_foh \
-    dataloader.train.num_workers=128 \
+    train.output_dir=output/detection_logs/vim_tiny_vimdet_foh \
+    train.init_checkpoint="" \
+    dataloader.train.num_workers=16 \
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=foh
