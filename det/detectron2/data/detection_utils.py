@@ -12,6 +12,92 @@ import pycocotools.mask as mask_util
 import torch
 from PIL import Image
 
+try:
+    from shapely.geometry import MultiPolygon
+except ImportError:
+    MultiPolygon = None
+
+# Monkey-patch fvcore to handle MultiPolygon objects in apply_polygons
+# This fixes the issue where fvcore's Transform classes create MultiPolygon objects
+# internally and then try to iterate over them, causing TypeError
+if MultiPolygon is not None:
+    try:
+        from fvcore.transforms.transform import Transform
+        
+        # Patch the Transform base class's apply_polygons if it exists
+        if hasattr(Transform, 'apply_polygons'):
+            _original_transform_apply_polygons = Transform.apply_polygons
+            
+            def _patched_transform_apply_polygons(self, polygons):
+                """Patched version that handles MultiPolygon objects."""
+                # Check if any polygon is a MultiPolygon and extract individual polygons
+                normalized_polygons = []
+                for poly in polygons:
+                    if isinstance(poly, MultiPolygon):
+                        normalized_polygons.extend([
+                            np.array(p.exterior.coords) for p in poly.geoms
+                        ])
+                    else:
+                        normalized_polygons.append(poly)
+                
+                # Apply the original transform
+                result = _original_transform_apply_polygons(self, normalized_polygons)
+                
+                # Handle MultiPolygon objects in the result
+                if isinstance(result, MultiPolygon):
+                    return [np.array(p.exterior.coords) for p in result.geoms]
+                elif isinstance(result, list):
+                    processed_result = []
+                    for p in result:
+                        if isinstance(p, MultiPolygon):
+                            processed_result.extend([
+                                np.array(poly.exterior.coords) for poly in p.geoms
+                            ])
+                        else:
+                            processed_result.append(p)
+                    return processed_result
+                else:
+                    return result
+            
+            Transform.apply_polygons = _patched_transform_apply_polygons
+        
+        # Also patch TransformList for completeness
+        from fvcore.transforms.transform import TransformList
+        if hasattr(TransformList, 'apply_polygons'):
+            _original_transformlist_apply_polygons = TransformList.apply_polygons
+            
+            def _patched_transformlist_apply_polygons(self, polygons):
+                """Patched TransformList version that handles MultiPolygon objects."""
+                # Normalize MultiPolygon objects before applying
+                normalized_polygons = []
+                for poly in polygons:
+                    if isinstance(poly, MultiPolygon):
+                        normalized_polygons.extend([
+                            np.array(p.exterior.coords) for p in poly.geoms
+                        ])
+                    else:
+                        normalized_polygons.append(poly)
+                
+                # Apply transforms
+                result = _original_transformlist_apply_polygons(self, normalized_polygons)
+                
+                # Handle MultiPolygon objects in the result
+                processed_result = []
+                for p in result:
+                    if isinstance(p, MultiPolygon):
+                        processed_result.extend([
+                            np.array(poly.exterior.coords) for poly in p.geoms
+                        ])
+                    else:
+                        processed_result.append(p)
+                
+                return processed_result
+            
+            TransformList.apply_polygons = _patched_transformlist_apply_polygons
+    except (ImportError, AttributeError):
+        # If fvcore is not available or structure changed, skip patching
+        pass
+
 from detectron2.structures import (
     BitMasks,
     Boxes,
@@ -306,9 +392,44 @@ def transform_instance_annotations(
         if isinstance(segm, list):
             # polygons
             polygons = [np.asarray(p).reshape(-1, 2) for p in segm]
-            annotation["segmentation"] = [
-                p.reshape(-1) for p in transforms.apply_polygons(polygons)
-            ]
+            try:
+                transformed_polygons = transforms.apply_polygons(polygons)
+            except TypeError as e:
+                # Fallback: If fvcore fails with MultiPolygon error, apply transforms manually
+                if MultiPolygon is not None and "'MultiPolygon' object is not iterable" in str(e):
+                    # Apply transforms coordinate by coordinate to avoid MultiPolygon issues
+                    transformed_polygons = []
+                    for poly in polygons:
+                        # Apply transforms to coordinates
+                        coords = transforms.apply_coords(poly)
+                        transformed_polygons.append(coords)
+                else:
+                    raise
+            # Handle MultiPolygon objects returned by transforms (e.g., after cropping)
+            # This can happen when transforms like cropping split a polygon into multiple parts
+            if MultiPolygon is not None and isinstance(transformed_polygons, MultiPolygon):
+                # If the entire result is a MultiPolygon, extract its geometries
+                annotation["segmentation"] = [
+                    np.array(poly.exterior.coords).reshape(-1) 
+                    for poly in transformed_polygons.geoms
+                ]
+            elif MultiPolygon is not None:
+                # Handle case where list contains MultiPolygon objects
+                processed_polygons = []
+                for p in transformed_polygons:
+                    if isinstance(p, MultiPolygon):
+                        # Extract individual polygons from MultiPolygon
+                        processed_polygons.extend([
+                            np.array(poly.exterior.coords).reshape(-1) 
+                            for poly in p.geoms
+                        ])
+                    else:
+                        processed_polygons.append(p.reshape(-1))
+                annotation["segmentation"] = processed_polygons
+            else:
+                annotation["segmentation"] = [
+                    p.reshape(-1) for p in transformed_polygons
+                ]
         elif isinstance(segm, dict):
             # RLE
             mask = mask_util.decode(segm)
