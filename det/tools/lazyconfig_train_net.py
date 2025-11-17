@@ -13,6 +13,17 @@ To add more complicated training logic, you can easily add other configs
 in the config file and implement a new train_net.py to handle them.
 """
 import logging
+import os
+import sys
+
+# Ensure we import from local det/detectron2 directory
+# Get the directory containing this script (det/tools/)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the det/ directory (parent of tools/)
+_det_dir = os.path.dirname(_script_dir)
+# Add det/ to sys.path at the beginning so local detectron2 takes precedence
+if _det_dir not in sys.path:
+    sys.path.insert(0, _det_dir)
 
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import LazyConfig, instantiate

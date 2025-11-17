@@ -23,7 +23,6 @@
 
 - Meet some problems of env? Requirements for reference: seg-requirements.txt
 
-
 ## Train Your VimSeg
 
 `bash scripts/ft_vim_tiny_upernet.sh`
@@ -35,4 +34,5 @@
 ---
 
 ## Acknowledgement
+
 Vim semantic segmentation is built with [MMSegmentation](https://github.com/open-mmlab/mmsegmentation/tree/v0.20.2), [EVA-02](https://github.com/baaivision/EVA/tree/master/EVA-02), and [BEiT](https://github.com/microsoft/unilm/tree/master/beit/semantic_segmentation).

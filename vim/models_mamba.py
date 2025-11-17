@@ -167,6 +167,13 @@ def create_block(
                        if_divide_out=if_divide_out, init_layer_scale=init_layer_scale, 
                        discretization_method=discretization_method,
                        **ssm_cfg, **factory_kwargs)
+    # Validate RMSNorm availability if rms_norm is requested
+    if rms_norm and RMSNorm is None:
+        raise ImportError(
+            "RMSNorm is requested (rms_norm=True) but could not be imported. "
+            "Please ensure mamba_ssm.ops.triton.layer_norm is available, "
+            "or set rms_norm=False to use nn.LayerNorm instead."
+        )
     norm_cls = partial(
         nn.LayerNorm if not rms_norm else RMSNorm, eps=norm_epsilon, **factory_kwargs
     )
@@ -271,6 +278,13 @@ class VisionMamba(nn.Module):
         # add factory_kwargs into kwargs
         kwargs.update(factory_kwargs) 
         super().__init__()
+        # Validate RMSNorm availability if rms_norm is requested
+        if rms_norm and RMSNorm is None:
+            raise ImportError(
+                "RMSNorm is requested (rms_norm=True) but could not be imported. "
+                "Please ensure mamba_ssm.ops.triton.layer_norm is available, "
+                "or set rms_norm=False to use nn.LayerNorm instead."
+            )
         self.residual_in_fp32 = residual_in_fp32
         self.fused_add_norm = fused_add_norm
         self.if_bidirectional = if_bidirectional
@@ -347,6 +361,13 @@ class VisionMamba(nn.Module):
         )
         
         # output head
+        # Validate RMSNorm availability if rms_norm is requested
+        if rms_norm and RMSNorm is None:
+            raise ImportError(
+                "RMSNorm is requested (rms_norm=True) but could not be imported. "
+                "Please ensure mamba_ssm.ops.triton.layer_norm is available, "
+                "or set rms_norm=False to use nn.LayerNorm instead."
+            )
         self.norm_f = (nn.LayerNorm if not rms_norm else RMSNorm)(
             embed_dim, eps=norm_epsilon, **factory_kwargs
         )

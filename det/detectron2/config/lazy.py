@@ -144,6 +144,28 @@ Within a config file, relative import can only import other config files.
         return cur_file
 
     def new_import(name, globals=None, locals=None, fromlist=(), level=0):
+        # Ensure local det/detectron2 is used for absolute imports
+        if level == 0 and name == "detectron2":
+            # For absolute detectron2 imports, ensure we use local version
+            # Find det/ directory by looking for detectron2 package with vim module
+            import sys
+            for path in list(sys.path):  # Use list copy to avoid modification during iteration
+                det_detectron2 = os.path.join(path, "detectron2")
+                if os.path.isdir(det_detectron2) and os.path.isfile(os.path.join(det_detectron2, "__init__.py")):
+                    # Check if this detectron2 has the vim module (local version)
+                    vim_module = os.path.join(det_detectron2, "modeling", "backbone", "vim.py")
+                    if os.path.isfile(vim_module):
+                        # This is likely the local version, ensure it's first in path
+                        try:
+                            current_index = sys.path.index(path)
+                            if current_index > 0:
+                                sys.path.remove(path)
+                                sys.path.insert(0, path)
+                        except ValueError:
+                            # path not in sys.path (shouldn't happen, but safe)
+                            sys.path.insert(0, path)
+                        break
+        
         if (
             # Only deal with relative imports inside config files
             level != 0
