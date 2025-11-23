@@ -1,0 +1,12 @@
+name: conda_vimsegdet
+channels:
+  - defaults
+dependencies:
+  - python==3.10.19
+  - numpy=1.24.3
+  - opencv
+  - libstdcxx-ng
+  - pytorch-cuda=12.1
+  - pytorch==2.1.0
+  - torchvision==0.16.0
+prefix: /home/f7ibrahi/projects/def-wangcs/f7ibrahi/miniconda3/envs/conda_vimsegdet

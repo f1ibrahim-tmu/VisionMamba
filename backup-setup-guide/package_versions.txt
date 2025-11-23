@@ -1,0 +1,27 @@
+# Core Packages
+pytorch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+mmcv-full==1.7.2
+opencv==4.12.0
+
+# OpenMMLab
+mmsegmentation==0.30.0
+mmdetection==2.28.0
+
+# Mamba
+causal-conv1d==1.1.0
+mamba-ssm==1.1.1
+
+# Transformers
+transformers==4.36.0
+tokenizers==0.15.0
+
+# Other
+numpy==1.24.3
+scipy
+einops
+timm
+yapf
+terminaltables
+pycocotools

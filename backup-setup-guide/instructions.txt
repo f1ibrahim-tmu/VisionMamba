@@ -1,0 +1,357 @@
+# Create export directory
+mkdir -p ~/visionmamba_export
+cd ~/visionmamba_export
+
+# 1. Export conda environment
+conda env export > environment.yml
+pip list --format=freeze > pip_requirements.txt
+
+# 2. Save your activation script
+cp ~/activate_vim.sh ./
+
+# 3. Document module versions
+module list 2>&1 > loaded_modules.txt
+
+# 4. Document all environment variables
+env | grep -E 'CONDA|PYTHON|PIP|LD_LIBRARY|PATH|CUDA' | sort > environment_vars.txt
+
+# 5. Create detailed documentation
+cat > INSTALLATION_GUIDE.md << 'EOF'
+# VisionMamba Installation Guide
+
+## System Requirements
+- Linux OS (tested on Compute Canada)
+- NVIDIA GPU with CUDA 12.2
+- Conda/Miniconda
+- GCC 12.3
+- CUDA 12.2 toolkit
+
+## Module Loading (Compute Canada specific)
+```bash
+module purge
+module load StdEnv/2023
+module load gcc/12.3
+module load cuda/12.2
+```
+
+## Installation Steps
+
+### 1. Create Conda Environment
+```bash
+# Option A: From exported environment file
+conda env create -f environment.yml
+
+# Option B: Manual creation
+conda create -n conda_vimsegdet python=3.10.13 -y
+conda activate conda_vimsegdet
+```
+
+### 2. Install Core Packages
+```bash
+# Install via conda (preferred for stability)
+conda install pytorch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
+
+# Install opencv via conda
+conda install -c conda-forge opencv libstdcxx-ng libgcc-ng -y
+
+# Install other dependencies
+pip install -r pip_requirements.txt --no-user
+```
+
+### 3. Install MMCV
+```bash
+pip install --no-user \
+    mmcv-full==1.7.2 \
+    -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1.0/index.html
+```
+
+### 4. Clone VisionMamba Repository
+```bash
+git clone https://github.com/f1ibrahim-tmu/VisionMamba
+cd VisionMamba
+```
+
+### 5. Install Mamba Dependencies (ON COMPUTE NODE)
+```bash
+# Request compute node
+salloc --time=1:00:00 --mem=16G --cpus-per-task=4
+
+# Set environment variables
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+export PYTHONNOUSERSITE=1
+export PIP_USER=0
+export PIP_NO_USER=1
+
+# Install causal-conv1d
+pip install --no-user --no-build-isolation causal-conv1d==1.1.0
+
+# Install mamba
+cd mamba-1p1p1
+pip install --no-user --no-build-isolation -e .
+cd ..
+```
+
+### 6. Install MMSegmentation and MMDetection
+```bash
+# MMSegmentation
+cd seg/mmsegmentation
+pip install --no-user --no-build-isolation -e .
+cd ../..
+
+# MMDetection
+cd det/mmdetection
+pip install --no-user --no-build-isolation -e .
+cd ../..
+```
+
+### 7. Setup Activation Script
+Copy `activate_vim.sh` to your home directory and source it for each session.
+
+## Critical Environment Variables
+See `environment_vars.txt` for the complete list.
+
+Most important:
+- `LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"`
+- `PATH="$CONDA_PREFIX/bin:$PATH"`
+- `PYTHONNOUSERSITE=1`
+- `PIP_USER=0`
+- `PIP_NO_USER=1`
+
+## Verification
+```bash
+python << 'EOF'
+import torch, mmcv, mmseg, mmdet, cv2
+from mamba_ssm import Mamba
+import causal_conv1d
+
+print(f"PyTorch: {torch.__version__}")
+print(f"MMCV: {mmcv.__version__}")
+print(f"MMSeg: {mmseg.__version__}")
+print(f"MMDet: {mmdet.__version__}")
+print(f"OpenCV: {cv2.__version__}")
+print(f"causal_conv1d: {causal_conv1d.__version__}")
+print("Mamba: OK")
+EOF
+```
+
+## Troubleshooting
+- If packages install to `~/.local`, ensure environment variables are set correctly
+- Compile causal-conv1d and mamba on compute nodes, not login nodes
+- Use conda for PyTorch and OpenCV to avoid library conflicts
+- Always use `--no-user` flag with pip
+
+EOF
+
+# 6. Create package version manifest
+cat > package_versions.txt << 'EOF'
+# Core Packages
+pytorch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+mmcv-full==1.7.2
+opencv==4.12.0
+
+# OpenMMLab
+mmsegmentation==0.30.0
+mmdetection==2.28.0
+
+# Mamba
+causal-conv1d==1.1.0
+mamba-ssm==1.1.1
+
+# Transformers
+transformers==4.36.0
+tokenizers==0.15.0
+
+# Other
+numpy==1.24.3
+scipy
+einops
+timm
+yapf
+terminaltables
+pycocotools
+EOF
+
+# 7. Create README
+cat > README.md << 'EOF'
+# VisionMamba Environment Export
+
+This directory contains everything needed to reproduce the VisionMamba environment on another HPC cluster.
+
+## Files Included
+
+- `environment.yml` - Complete conda environment specification
+- `pip_requirements.txt` - All pip packages with exact versions
+- `activate_vim.sh` - Environment activation script
+- `loaded_modules.txt` - Module versions used
+- `environment_vars.txt` - All environment variables
+- `INSTALLATION_GUIDE.md` - Step-by-step installation instructions
+- `package_versions.txt` - Key package versions for reference
+- `reproduce_environment.sh` - Automated reproduction script
+
+## Quick Start
+
+1. Copy this directory to your new HPC cluster
+2. Edit `reproduce_environment.sh` to match your cluster's module system
+3. Run: `bash reproduce_environment.sh`
+4. Follow any prompts and manual steps
+
+## Manual Installation
+
+See `INSTALLATION_GUIDE.md` for detailed step-by-step instructions.
+
+## Verification
+
+After installation, run:
+```bash
+source activate_vim.sh
+python -c "from mamba_ssm import Mamba; print('Success!')"
+```
+
+## Notes
+
+- Some packages (causal-conv1d, mamba) MUST be compiled on a compute node
+- Adjust module names/versions for your specific HPC cluster
+- PyTorch version (2.1.0) is critical for compatibility
+EOF
+
+# 8. Create automated reproduction script
+cat > reproduce_environment.sh << 'REPRO_EOF'
+#!/bin/bash
+# Automated VisionMamba Environment Reproduction Script
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${GREEN}VisionMamba Environment Reproduction${NC}"
+echo "======================================"
+echo ""
+
+# Check if on HPC cluster
+if [[ ! -f "/etc/slurm/slurm.conf" ]] && [[ ! -f "/etc/pbs.conf" ]]; then
+    echo -e "${YELLOW}Warning: This doesn't appear to be an HPC cluster${NC}"
+    echo "Continue anyway? (y/n)"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# 1. Load modules (ADJUST FOR YOUR CLUSTER)
+echo -e "\n${YELLOW}Step 1: Loading modules...${NC}"
+echo "Note: Adjust these module names for your cluster"
+module purge
+module load StdEnv/2023 || echo "Adjust module names for your cluster"
+module load gcc/12.3 || module load gcc
+module load cuda/12.2 || module load cuda
+
+echo -e "${GREEN}✓ Modules loaded${NC}"
+
+# 2. Create conda environment
+echo -e "\n${YELLOW}Step 2: Creating conda environment...${NC}"
+if conda env list | grep -q conda_vimsegdet; then
+    echo "Environment already exists. Remove it? (y/n)"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        conda env remove -n conda_vimsegdet -y
+    else
+        echo "Using existing environment"
+    fi
+fi
+
+conda env create -f environment.yml
+echo -e "${GREEN}✓ Conda environment created${NC}"
+
+# 3. Activate environment
+echo -e "\n${YELLOW}Step 3: Activating environment...${NC}"
+conda activate conda_vimsegdet
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+export PYTHONNOUSERSITE=1
+export PIP_USER=0
+export PIP_NO_USER=1
+
+echo -e "${GREEN}✓ Environment activated${NC}"
+
+# 4. Verify core packages
+echo -e "\n${YELLOW}Step 4: Verifying core packages...${NC}"
+python -c "import torch; print(f'PyTorch: {torch.__version__}')" || {
+    echo -e "${RED}PyTorch verification failed${NC}"
+    exit 1
+}
+
+python -c "import mmcv; print(f'MMCV: {mmcv.__version__}')" || {
+    echo -e "${RED}MMCV verification failed${NC}"
+    exit 1
+}
+
+echo -e "${GREEN}✓ Core packages verified${NC}"
+
+# 5. Setup activation script
+echo -e "\n${YELLOW}Step 5: Installing activation script...${NC}"
+cp activate_vim.sh ~/activate_vim.sh
+chmod +x ~/activate_vim.sh
+echo -e "${GREEN}✓ Activation script installed at ~/activate_vim.sh${NC}"
+
+# 6. Instructions for compute node compilation
+echo -e "\n${YELLOW}========================================${NC}"
+echo -e "${YELLOW}IMPORTANT: Next Steps${NC}"
+echo -e "${YELLOW}========================================${NC}"
+echo ""
+echo "You must compile causal-conv1d and mamba on a COMPUTE NODE:"
+echo ""
+echo "1. Request compute node:"
+echo "   salloc --time=1:00:00 --mem=16G --cpus-per-task=4"
+echo ""
+echo "2. Activate environment:"
+echo "   source ~/activate_vim.sh"
+echo ""
+echo "3. Clone VisionMamba:"
+echo "   git clone https://github.com/f1ibrahim-tmu/VisionMamba"
+echo "   cd VisionMamba"
+echo ""
+echo "4. Install causal-conv1d:"
+echo "   pip install --no-user --no-build-isolation causal-conv1d==1.1.0"
+echo ""
+echo "5. Install mamba:"
+echo "   cd mamba-1p1p1"
+echo "   pip install --no-user --no-build-isolation -e ."
+echo ""
+echo "6. Install MMSeg and MMDet:"
+echo "   cd ../seg/mmsegmentation"
+echo "   pip install --no-user --no-build-isolation -e ."
+echo "   cd ../../det/mmdetection"
+echo "   pip install --no-user --no-build-isolation -e ."
+echo ""
+echo -e "${GREEN}Setup script complete!${NC}"
+
+REPRO_EOF
+
+chmod +x reproduce_environment.sh
+
+# 9. Create tarball
+cd ~
+tar -czf visionmamba_export.tar.gz visionmamba_export/
+
+echo ""
+echo "=========================================="
+echo "✅ Export Complete!"
+echo "=========================================="
+echo ""
+echo "Created files:"
+echo "  ~/visionmamba_export/ - Export directory"
+echo "  ~/visionmamba_export.tar.gz - Compressed archive"
+echo ""
+echo "To transfer to another cluster:"
+echo "  scp visionmamba_export.tar.gz user@newcluster:~/"
+echo ""
+echo "On new cluster:"
+echo "  tar -xzf visionmamba_export.tar.gz"
+echo "  cd visionmamba_export"
+echo "  bash reproduce_environment.sh"
