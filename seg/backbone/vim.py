@@ -140,9 +140,49 @@ class VisionMambaSeg(VisionMamba):
             except:
                 print("no rope in the pretrained model")
 
-            if self.patch_embed.patch_size[-1] != state_dict["model"]["patch_embed.proj.weight"].shape[-1]:
-                state_dict_model.pop("patch_embed.proj.weight")
-                state_dict_model.pop("patch_embed.proj.bias")
+            # Check patch size and input channel mismatches
+            if "patch_embed.proj.weight" in state_dict_model:
+                checkpoint_patch_size = state_dict_model["patch_embed.proj.weight"].shape[-1]
+                checkpoint_in_chans = state_dict_model["patch_embed.proj.weight"].shape[1]
+                model_patch_size = self.patch_embed.patch_size[-1]
+                model_in_chans = self.patch_embed.proj.weight.shape[1]
+                
+                if checkpoint_patch_size != model_patch_size:
+                    logger.info(f"Skipping patch_embed.proj due to patch size mismatch: "
+                               f"checkpoint has {checkpoint_patch_size}, model expects {model_patch_size}")
+                    state_dict_model.pop("patch_embed.proj.weight", None)
+                    state_dict_model.pop("patch_embed.proj.bias", None)
+                elif checkpoint_in_chans != model_in_chans:
+                    logger.info(f"Skipping patch_embed.proj due to input channel mismatch: "
+                               f"checkpoint has {checkpoint_in_chans} channels, "
+                               f"model expects {model_in_chans} channels")
+                    state_dict_model.pop("patch_embed.proj.weight", None)
+                    state_dict_model.pop("patch_embed.proj.bias", None)
+            
+            # Filter out mixer layer parameters with size mismatches
+            # These depend on d_state and dt_rank which may differ between checkpoint and model
+            # Get the model's state dict to compare shapes
+            model_state_dict = self.state_dict()
+            keys_to_remove = []
+            
+            for key in list(state_dict_model.keys()):
+                # Check if this is a mixer parameter that might have size mismatches
+                if any(mixer_param in key for mixer_param in ['mixer.A_log', 'mixer.A_b_log', 
+                                                              'mixer.x_proj.weight', 'mixer.x_proj_b.weight']):
+                    # Compare shapes if the key exists in the model
+                    if key in model_state_dict:
+                        checkpoint_shape = state_dict_model[key].shape
+                        model_shape = model_state_dict[key].shape
+                        
+                        if checkpoint_shape != model_shape:
+                            keys_to_remove.append(key)
+                            logger.info(f"Skipping {key} due to size mismatch: "
+                                       f"checkpoint {checkpoint_shape} vs model {model_shape}")
+            
+            # Remove mismatched parameters
+            for key in keys_to_remove:
+                state_dict_model.pop(key, None)
+            
             interpolate_pos_embed(self, state_dict_model)
 
             res = self.load_state_dict(state_dict_model, strict=False) 
