@@ -1,7 +1,7 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba segmentation on ADE20K
 
-SEG_CONFIG=configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
+SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/vim_tiny_zoh/best_checkpoint.pth
 
 # Conditionally set resume checkpoint if it exists

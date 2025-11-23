@@ -1,7 +1,7 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba segmentation on ADE20K
 
-SEG_CONFIG=configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
+SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/vim_tiny_zoh/best_checkpoint.pth
 
 # Conditionally set resume checkpoint if it exists
@@ -19,12 +19,12 @@ fi
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
-    --seed 0 --work-dir work_dirs/vimseg-t-zoh --deterministic \
+    --seed 0 --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
-    --output_dir output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
+    --work-dir output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
     ${RESUME_ARG}
