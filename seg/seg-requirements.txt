@@ -60,7 +60,7 @@ matplotlib-inline==0.1.7
 mmcls==0.25.0
 mmengine>=0.10.0
 mmcv>=2.0.0
-mmsegmentation==0.29.1
+mmsegmentation>=1.0.0
 model-index==0.1.11
 msgpack==1.0.8
 ninja==1.11.1.1
