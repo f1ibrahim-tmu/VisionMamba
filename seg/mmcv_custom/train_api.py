@@ -7,7 +7,12 @@ from mmengine.model import MMDataParallel, MMDistributedDataParallel
 from mmengine.optim import build_optim_wrapper
 from mmengine.runner import Runner
 
-from mmseg.core import DistEvalHook, EvalHook
+# MMSegmentation 1.0.0+ moved eval hooks to mmseg.engine
+try:
+    from mmseg.engine import DistEvalHook, EvalHook
+except ImportError:
+    # Fallback for older versions
+    from mmseg.core import DistEvalHook, EvalHook
 from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.utils import get_root_logger
 try:

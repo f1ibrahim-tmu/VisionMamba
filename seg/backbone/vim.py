@@ -9,7 +9,12 @@ import torch.utils.checkpoint as checkpoint
 
 from mmcv_custom import load_checkpoint
 from mmseg.utils import get_root_logger
-from mmseg.models.builder import BACKBONES
+# MMSegmentation 1.0.0+ uses registry system
+try:
+    from mmseg.registry import MODELS as BACKBONES
+except ImportError:
+    # Fallback for older versions
+    from mmseg.models.builder import BACKBONES
 
 # add the root path to the system path
 import sys, os

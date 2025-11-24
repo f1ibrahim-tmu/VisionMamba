@@ -2,7 +2,12 @@ import mmcv
 import mmengine
 import numpy as np
 
-from mmseg.datasets.builder import PIPELINES
+# MMSegmentation 1.0.0+ uses registry system
+try:
+    from mmseg.registry import TRANSFORMS as PIPELINES
+except ImportError:
+    # Fallback for older versions
+    from mmseg.datasets.builder import PIPELINES
 
 
 @PIPELINES.register_module()
