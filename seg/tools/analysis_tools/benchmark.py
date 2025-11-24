@@ -2,9 +2,9 @@ import argparse
 import time
 
 import torch
-from mmcv import Config
-from mmcv.parallel import MMDataParallel
-from mmcv.runner import load_checkpoint
+from mmengine.config import Config
+from mmengine.model import MMDataParallel
+from mmengine.runner import load_checkpoint
 
 from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.models import build_segmentor

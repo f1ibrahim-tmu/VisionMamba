@@ -5,9 +5,12 @@ import os.path as osp
 import time
 
 import mmcv
+import mmengine
 import torch
-from mmcv.runner import init_dist
-from mmcv.utils import Config, DictAction, get_git_hash
+from mmengine.dist import init_dist
+from mmengine.config import Config
+from mmengine.argparse import DictAction
+from mmengine.utils import get_git_hash
 
 from mmseg import __version__
 from mmseg.apis import set_random_seed
@@ -97,7 +100,7 @@ def main():
         init_dist(args.launcher, **cfg.dist_params)
 
     # create work_dir
-    mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    mmengine.utils.mkdir_or_exist(osp.abspath(cfg.work_dir))
     # dump config
     cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
     # init the logger before other steps

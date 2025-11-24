@@ -1,4 +1,10 @@
-from mmcv.runner import OptimizerHook, HOOKS
+from mmengine.hooks import Hook
+from mmengine.registry import HOOKS
+
+# Create a base OptimizerHook class for backward compatibility
+class OptimizerHook(Hook):
+    """Base optimizer hook for backward compatibility."""
+    pass
 try:
     import apex
 except:

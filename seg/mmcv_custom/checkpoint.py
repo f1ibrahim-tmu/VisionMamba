@@ -16,11 +16,15 @@ from torch.utils import model_zoo
 from torch.nn import functional as F
 
 import mmcv
-from mmcv.fileio import FileClient
-from mmcv.fileio import load as load_file
-from mmcv.parallel import is_module_wrapper
-from mmcv.utils import mkdir_or_exist
-from mmcv.runner import get_dist_info
+import mmengine
+from mmengine.fileio import FileClient
+from mmengine.fileio import load as load_file
+from mmengine.model import is_model_wrapper
+from mmengine.utils import mkdir_or_exist
+from mmengine.dist import get_dist_info
+
+# Backward compatibility alias
+is_module_wrapper = is_model_wrapper
 
 from scipy import interpolate
 import numpy as np
@@ -187,7 +191,15 @@ def get_torchvision_models():
 
 def get_external_models():
     mmcv_home = _get_mmcv_home()
-    default_json_path = osp.join(mmcv.__path__[0], 'model_zoo/open_mmlab.json')
+    # MMCV 2.x doesn't have model_zoo, use mmengine if available or handle differently
+    try:
+        default_json_path = osp.join(mmengine.__path__[0], 'model_zoo/open_mmlab.json')
+    except (AttributeError, FileNotFoundError):
+        # Fallback: try mmcv path or use empty dict
+        try:
+            default_json_path = osp.join(mmcv.__path__[0], 'model_zoo/open_mmlab.json')
+        except (AttributeError, FileNotFoundError):
+            return {}
     default_urls = load_file(default_json_path)
     assert isinstance(default_urls, dict)
     external_json_path = osp.join(mmcv_home, 'open_mmlab.json')
@@ -200,18 +212,27 @@ def get_external_models():
 
 
 def get_mmcls_models():
-    mmcls_json_path = osp.join(mmcv.__path__[0], 'model_zoo/mmcls.json')
+    try:
+        mmcls_json_path = osp.join(mmengine.__path__[0], 'model_zoo/mmcls.json')
+    except (AttributeError, FileNotFoundError):
+        try:
+            mmcls_json_path = osp.join(mmcv.__path__[0], 'model_zoo/mmcls.json')
+        except (AttributeError, FileNotFoundError):
+            return {}
     mmcls_urls = load_file(mmcls_json_path)
-
     return mmcls_urls
 
 
 def get_deprecated_model_names():
-    deprecate_json_path = osp.join(mmcv.__path__[0],
-                                   'model_zoo/deprecated.json')
+    try:
+        deprecate_json_path = osp.join(mmengine.__path__[0], 'model_zoo/deprecated.json')
+    except (AttributeError, FileNotFoundError):
+        try:
+            deprecate_json_path = osp.join(mmcv.__path__[0], 'model_zoo/deprecated.json')
+        except (AttributeError, FileNotFoundError):
+            return {}
     deprecate_urls = load_file(deprecate_json_path)
     assert isinstance(deprecate_urls, dict)
-
     return deprecate_urls
 
 
@@ -620,7 +641,7 @@ def save_checkpoint(model, filename, optimizer=None, meta=None):
                 f.flush()
             model.create_file(checkpoint_file, name=model_name)
     else:
-        mmcv.mkdir_or_exist(osp.dirname(filename))
+        mmengine.utils.mkdir_or_exist(osp.dirname(filename))
         # immediately flush buffer
         with open(filename, 'wb') as f:
             torch.save(checkpoint, f)

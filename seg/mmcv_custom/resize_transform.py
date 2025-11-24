@@ -1,4 +1,5 @@
 import mmcv
+import mmengine
 import numpy as np
 
 from mmseg.datasets.builder import PIPELINES
@@ -75,7 +76,7 @@ class SETR_Resize(object):
                 ``scale_idx`` is the selected index in the given candidates.
         """
 
-        assert mmcv.is_list_of(img_scales, tuple)
+        assert mmengine.utils.is_list_of(img_scales, tuple)
         scale_idx = np.random.randint(len(img_scales))
         img_scale = img_scales[scale_idx]
         return img_scale, scale_idx
@@ -95,7 +96,7 @@ class SETR_Resize(object):
                 to be consistent with :func:`random_select`.
         """
 
-        assert mmcv.is_list_of(img_scales, tuple) and len(img_scales) == 2
+        assert mmengine.utils.is_list_of(img_scales, tuple) and len(img_scales) == 2
         img_scale_long = [max(s) for s in img_scales]
         img_scale_short = [min(s) for s in img_scales]
         long_edge = np.random.randint(
@@ -184,7 +185,9 @@ class SETR_Resize(object):
                     new_h, new_w = new_short, new_short * w / h
                 results['scale'] = (new_h, new_w)
 
-            img, scale_factor = mmcv.imrescale(
+            # MMCV 2.x: imrescale moved to mmcv.image or use cv2
+            from mmcv.image import imrescale
+            img, scale_factor = imrescale(
                 results['img'], results['scale'], return_scale=True)
             # the w_scale and h_scale has minor difference
             # a real fix should be done in the mmcv.imrescale in the future
@@ -193,7 +196,8 @@ class SETR_Resize(object):
             w_scale = new_w / w
             h_scale = new_h / h
         else:
-            img, w_scale, h_scale = mmcv.imresize(
+            from mmcv.image import imresize
+            img, w_scale, h_scale = imresize(
                 results['img'], results['scale'], return_scale=True)
         scale_factor = np.array([w_scale, h_scale, w_scale, h_scale],
                                 dtype=np.float32)
@@ -205,12 +209,13 @@ class SETR_Resize(object):
 
     def _resize_seg(self, results):
         """Resize semantic segmentation map with ``results['scale']``."""
+        from mmcv.image import imrescale, imresize
         for key in results.get('seg_fields', []):
             if self.keep_ratio:
-                gt_seg = mmcv.imrescale(
+                gt_seg = imrescale(
                     results[key], results['scale'], interpolation='nearest')
             else:
-                gt_seg = mmcv.imresize(
+                gt_seg = imresize(
                     results[key], results['scale'], interpolation='nearest')
             results['gt_semantic_seg'] = gt_seg
 

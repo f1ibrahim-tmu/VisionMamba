@@ -7,7 +7,9 @@ import torch
 from torch.optim import Optimizer
 
 import mmcv
-from mmcv.runner import RUNNERS, IterBasedRunner
+import mmengine
+from mmengine.registry import RUNNERS
+from mmengine.runner import IterBasedRunner
 from .checkpoint import save_checkpoint
 
 try:

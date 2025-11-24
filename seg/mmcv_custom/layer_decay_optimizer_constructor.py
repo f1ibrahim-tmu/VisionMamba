@@ -1,6 +1,10 @@
 import json
-from mmcv.runner import OPTIMIZER_BUILDERS, DefaultOptimizerConstructor
-from mmcv.runner import get_dist_info
+from mmengine.optim import OPTIM_WRAPPER_CONSTRUCTORS, DefaultOptimWrapperConstructor
+from mmengine.dist import get_dist_info
+
+# Backward compatibility
+OPTIMIZER_BUILDERS = OPTIM_WRAPPER_CONSTRUCTORS
+DefaultOptimizerConstructor = DefaultOptimWrapperConstructor
 
 
 def get_num_layer_for_vit(var_name, num_max_layer):
@@ -15,8 +19,8 @@ def get_num_layer_for_vit(var_name, num_max_layer):
         return num_max_layer - 1
 
 
-@OPTIMIZER_BUILDERS.register_module()
-class LayerDecayOptimizerConstructor(DefaultOptimizerConstructor):
+@OPTIM_WRAPPER_CONSTRUCTORS.register_module()
+class LayerDecayOptimizerConstructor(DefaultOptimWrapperConstructor):
     def add_params(self, params, module, prefix='', is_dcn_module=None):
         """Add all parameters of module to the params list.
         The parameters of the given module will be added to the list of param

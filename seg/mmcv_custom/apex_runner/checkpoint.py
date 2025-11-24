@@ -7,8 +7,12 @@ import torch
 from torch.optim import Optimizer
 
 import mmcv
-from mmcv.parallel import is_module_wrapper
-from mmcv.runner.checkpoint import weights_to_cpu, get_state_dict
+import mmengine
+from mmengine.model import is_model_wrapper
+from mmengine.runner import weights_to_cpu, get_state_dict
+
+# Backward compatibility
+is_module_wrapper = is_model_wrapper
 
 try:
     import apex
@@ -80,7 +84,7 @@ def save_checkpoint(model, filename, optimizer=None, meta=None):
                 f.flush()
             model.create_file(checkpoint_file, name=model_name)
     else:
-        mmcv.mkdir_or_exist(osp.dirname(filename))
+        mmengine.utils.mkdir_or_exist(osp.dirname(filename))
         # immediately flush buffer
         with open(filename, 'wb') as f:
             torch.save(checkpoint, f)

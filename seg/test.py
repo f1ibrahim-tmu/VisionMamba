@@ -7,11 +7,12 @@ import time
 import warnings
 
 import mmcv
+import mmengine
 import torch
 from mmcv.cnn.utils import revert_sync_batchnorm
-from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
-                         wrap_fp16_model)
-from mmcv.utils import DictAction
+from mmengine.dist import get_dist_info, init_dist
+from mmengine.runner import load_checkpoint, wrap_fp16_model
+from mmengine.argparse import DictAction
 
 from mmseg import digit_version
 from mmseg.apis import multi_gpu_test, single_gpu_test
@@ -131,7 +132,7 @@ def main():
     if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
         raise ValueError('The output file must be a pkl file.')
 
-    cfg = mmcv.Config.fromfile(args.config)
+    cfg = mmengine.Config.fromfile(args.config)
     print("cfg: ", cfg)
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
@@ -170,7 +171,7 @@ def main():
     rank, _ = get_dist_info()
     # allows not to create
     if args.work_dir is not None and rank == 0:
-        mmcv.mkdir_or_exist(osp.abspath(args.work_dir))
+        mmengine.utils.mkdir_or_exist(osp.abspath(args.work_dir))
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
         if args.aug_test:
             json_file = osp.join(args.work_dir,
@@ -181,7 +182,7 @@ def main():
     elif rank == 0:
         work_dir = osp.join('./work_dirs',
                             osp.splitext(osp.basename(args.config))[0])
-        mmcv.mkdir_or_exist(osp.abspath(work_dir))
+        mmengine.utils.mkdir_or_exist(osp.abspath(work_dir))
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
         if args.aug_test:
             json_file = osp.join(work_dir,
@@ -258,7 +259,7 @@ def main():
         else:
             tmpdir = '.format_cityscapes'
             eval_kwargs.setdefault('imgfile_prefix', tmpdir)
-        mmcv.mkdir_or_exist(tmpdir)
+        mmengine.utils.mkdir_or_exist(tmpdir)
     else:
         tmpdir = None
 
@@ -269,8 +270,10 @@ def main():
             'we convert SyncBN to BN. Please use dist_train.sh which can '
             'avoid this error.')
         if not torch.cuda.is_available():
-            assert digit_version(mmcv.__version__) >= digit_version('1.4.4'), \
-                'Please use MMCV >= 1.4.4 for CPU training!'
+            # MMCV 2.x is compatible with CPU training
+            import mmengine
+            assert digit_version(mmengine.__version__) >= digit_version('0.10.0'), \
+                'Please use MMEngine >= 0.10.0 for CPU training!'
         model = revert_sync_batchnorm(model)
         model = build_dp(model, cfg.device, device_ids=cfg.gpu_ids)
         results = single_gpu_test(
@@ -308,12 +311,12 @@ def main():
                 'np.array, pre-eval results or file paths for '
                 '``dataset.format_results()``.')
             print(f'\nwriting results to {args.out}')
-            mmcv.dump(results, args.out)
+            mmengine.fileio.dump(results, args.out)
         if args.eval:
             eval_kwargs.update(metric=args.eval)
             metric = dataset.evaluate(results, **eval_kwargs)
             metric_dict = dict(config=args.config, metric=metric)
-            mmcv.dump(metric_dict, json_file, indent=4)
+            mmengine.fileio.dump(metric_dict, json_file, indent=4)
             if tmpdir is not None and eval_on_format_results:
                 # remove tmp dir when cityscapes evaluation
                 shutil.rmtree(tmpdir)
