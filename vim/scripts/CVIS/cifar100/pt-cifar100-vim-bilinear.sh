@@ -1,10 +1,15 @@
 #!/bin/bash
 
 # conda activate conda_visionmamba
-# cd ./projects/VisionMamba/vim;
+# Get the project root directory (3 levels up from this script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Accept seed as first argument, default to 0
 SEED=${1:-0}
+
+# Change to project root to ensure relative paths work
+cd "$PROJECT_ROOT"
 
 OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     --rdzv-backend=c10d \
