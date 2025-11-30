@@ -4,6 +4,9 @@
 # Example: ./Rorqual_run-single-method-seeds.sh zoh
 # Example: ./Rorqual_run-single-method-seeds.sh highorder 0,1,2,3,4
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <method> [seeds]"
     echo "Methods: zoh, foh, bilinear, poly, highorder, rk4"
@@ -21,27 +24,27 @@ IFS=',' read -ra SEEDS <<< "$SEEDS_STR"
 # Map method name to script
 case $METHOD in
     zoh)
-        SCRIPT="./scripts/CC/Rorqual/Rorqual_pt-vim-zoh.sh"
+        SCRIPT="$SCRIPT_DIR/Rorqual_pt-vim-zoh.sh"
         METHOD_NAME="Zero Order Hold (ZOH)"
         ;;
     foh)
-        SCRIPT="./scripts/CC/Rorqual/Rorqual_pt-vim-foh.sh"
+        SCRIPT="$SCRIPT_DIR/Rorqual_pt-vim-foh.sh"
         METHOD_NAME="First Order Hold (FOH)"
         ;;
     bilinear)
-        SCRIPT="./scripts/CC/Rorqual/Rorqual_pt-vim-bilinear.sh"
+        SCRIPT="$SCRIPT_DIR/Rorqual_pt-vim-bilinear.sh"
         METHOD_NAME="Bilinear (Tustin) Transform"
         ;;
     poly)
-        SCRIPT="./scripts/CC/Rorqual/Rorqual_pt-vim-poly.sh"
+        SCRIPT="$SCRIPT_DIR/Rorqual_pt-vim-poly.sh"
         METHOD_NAME="Polynomial Interpolation"
         ;;
     highorder)
-        SCRIPT="./scripts/CC/Rorqual/Rorqual_pt-vim-highorder.sh"
+        SCRIPT="$SCRIPT_DIR/Rorqual_pt-vim-highorder.sh"
         METHOD_NAME="Higher-Order Hold"
         ;;
     rk4)
-        SCRIPT="./scripts/CC/Rorqual/Rorqual_pt-vim-rk4.sh"
+        SCRIPT="$SCRIPT_DIR/Rorqual_pt-vim-rk4.sh"
         METHOD_NAME="Runge-Kutta 4th Order (RK4)"
         ;;
     *)
@@ -78,5 +81,5 @@ echo "All seeds completed for $METHOD_NAME"
 echo "=========================================="
 echo ""
 echo "To extract results, run:"
-echo "  python ./scripts/CC/Rorqual/extract_results.py --method $METHOD"
+echo "  python $SCRIPT_DIR/extract_results.py --method $METHOD"
 
