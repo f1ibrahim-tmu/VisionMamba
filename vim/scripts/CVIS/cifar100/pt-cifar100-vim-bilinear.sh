@@ -6,7 +6,7 @@
 # Accept seed as first argument, default to 0
 SEED=${1:-0}
 
-OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
+OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
     --master_port=0 \
