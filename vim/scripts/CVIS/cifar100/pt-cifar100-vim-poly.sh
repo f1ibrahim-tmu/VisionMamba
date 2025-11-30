@@ -15,7 +15,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run 
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
     --master_port=0 \
-    ./vim/main.py \
+    ./main.py \
     --model vim_tiny_patch16_224_bimambav2_poly \
     --batch-size 128 \
     --drop-path 0.0 \
