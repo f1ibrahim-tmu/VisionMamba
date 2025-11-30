@@ -84,5 +84,110 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
     # - Checkpointing, logging, visualization, etc.
     runner = Runner.from_cfg(cfg)
     
+    # Register throughput hook if not already in custom_hooks
+    from .throughput_hook import ThroughputHook
+    log_interval = cfg.default_hooks.get('logger', {}).get('interval', 50) if hasattr(cfg, 'default_hooks') and cfg.default_hooks else 50
+    runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
+    
     # Start training
     runner.train()
+||||||| parent of 99cf74f (Add throughput metrics (img/sec and samples/epoch) to training loops)
+        model = MMDataParallel(
+            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+
+    if cfg.get('runner') is None:
+        cfg.runner = {'type': 'IterBasedRunner', 'max_iters': cfg.total_iters}
+        warnings.warn(
+            'config is now expected to have a `runner` section, '
+            'please set `runner` in your config.', UserWarning)
+
+    runner = build_runner(
+        cfg.runner,
+        default_args=dict(
+            model=model,
+            batch_processor=None,
+            optimizer=optimizer,
+            work_dir=cfg.work_dir,
+            logger=logger,
+            meta=meta))
+
+    # register hooks
+    runner.register_training_hooks(cfg.lr_config, cfg.optimizer_config,
+                                   cfg.checkpoint_config, cfg.log_config,
+                                   cfg.get('momentum_config', None))
+
+    # an ugly walkaround to make the .log and .log.json filenames the same
+    runner.timestamp = timestamp
+
+    # register eval hooks
+    if validate:
+        val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
+        val_dataloader = build_dataloader(
+            val_dataset,
+            samples_per_gpu=1,
+            workers_per_gpu=cfg.data.workers_per_gpu,
+            dist=distributed,
+            shuffle=False)
+        eval_cfg = cfg.get('evaluation', {})
+        eval_cfg['by_epoch'] = 'IterBasedRunner' not in cfg.runner['type']
+        eval_hook = DistEvalHook if distributed else EvalHook
+        runner.register_hook(eval_hook(val_dataloader, **eval_cfg), priority='LOW')
+
+    if cfg.resume_from:
+        runner.resume(cfg.resume_from)
+    elif cfg.load_from:
+        runner.load_checkpoint(cfg.load_from)
+    runner.run(data_loaders, cfg.workflow)
+=======
+        model = MMDataParallel(
+            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+
+    if cfg.get('runner') is None:
+        cfg.runner = {'type': 'IterBasedRunner', 'max_iters': cfg.total_iters}
+        warnings.warn(
+            'config is now expected to have a `runner` section, '
+            'please set `runner` in your config.', UserWarning)
+
+    runner = build_runner(
+        cfg.runner,
+        default_args=dict(
+            model=model,
+            batch_processor=None,
+            optimizer=optimizer,
+            work_dir=cfg.work_dir,
+            logger=logger,
+            meta=meta))
+
+    # register hooks
+    runner.register_training_hooks(cfg.lr_config, cfg.optimizer_config,
+                                   cfg.checkpoint_config, cfg.log_config,
+                                   cfg.get('momentum_config', None))
+    
+    # register throughput hook
+    from .throughput_hook import ThroughputHook
+    log_interval = cfg.log_config.get('interval', 50) if cfg.log_config else 50
+    runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
+
+    # an ugly walkaround to make the .log and .log.json filenames the same
+    runner.timestamp = timestamp
+
+    # register eval hooks
+    if validate:
+        val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
+        val_dataloader = build_dataloader(
+            val_dataset,
+            samples_per_gpu=1,
+            workers_per_gpu=cfg.data.workers_per_gpu,
+            dist=distributed,
+            shuffle=False)
+        eval_cfg = cfg.get('evaluation', {})
+        eval_cfg['by_epoch'] = 'IterBasedRunner' not in cfg.runner['type']
+        eval_hook = DistEvalHook if distributed else EvalHook
+        runner.register_hook(eval_hook(val_dataloader, **eval_cfg), priority='LOW')
+
+    if cfg.resume_from:
+        runner.resume(cfg.resume_from)
+    elif cfg.load_from:
+        runner.load_checkpoint(cfg.load_from)
+    runner.run(data_loaders, cfg.workflow)
+>>>>>>> 99cf74f (Add throughput metrics (img/sec and samples/epoch) to training loops)
