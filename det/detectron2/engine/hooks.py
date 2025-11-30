@@ -30,6 +30,7 @@ from .train_loop import HookBase
 __all__ = [
     "CallbackHook",
     "IterationTimer",
+    "ThroughputHook",
     "PeriodicWriter",
     "PeriodicCheckpointer",
     "BestCheckpointer",
@@ -152,6 +153,92 @@ class IterationTimer(HookBase):
             self._total_timer.reset()
 
         self._total_timer.pause()
+
+
+class ThroughputHook(HookBase):
+    """
+    Track throughput metrics (img/sec and samples/epoch) during training.
+    """
+
+    def __init__(self, log_period=20):
+        """
+        Args:
+            log_period (int): Period to log throughput metrics.
+        """
+        self.log_period = log_period
+        self.iter_start_time = None
+        self.epoch_start_time = None
+        self.total_samples = 0
+        self.epoch_samples = 0
+        self.throughput_buffer = []
+
+    def before_train(self):
+        """Called before training starts."""
+        self.epoch_start_time = time.perf_counter()
+        self.epoch_samples = 0
+        self.throughput_buffer = []
+
+    def before_step(self):
+        """Called before each training iteration."""
+        self.iter_start_time = time.perf_counter()
+
+    def after_step(self):
+        """Called after each training iteration."""
+        if self.iter_start_time is None:
+            return
+
+        # Get batch size from config
+        # In detectron2, batch size is typically SOLVER.IMS_PER_BATCH
+        try:
+            batch_size = self.trainer.cfg.SOLVER.IMS_PER_BATCH
+            # Adjust for distributed training - each GPU processes IMS_PER_BATCH
+            # So total batch size across all GPUs is IMS_PER_BATCH * world_size
+            # But per-GPU throughput is IMS_PER_BATCH / iter_time
+            # For logging, we use per-GPU batch size
+        except:
+            # Fallback: assume batch size of 1 per GPU
+            batch_size = 1
+
+        # Calculate iteration time and throughput
+        iter_time = time.perf_counter() - self.iter_start_time
+        if iter_time > 0:
+            img_per_sec = batch_size / iter_time
+            self.throughput_buffer.append(img_per_sec)
+            
+            # Log to EventStorage periodically
+            storage = self.trainer.storage
+            if storage.iter % self.log_period == 0:
+                # Calculate average throughput over recent iterations
+                if len(self.throughput_buffer) > 0:
+                    avg_img_per_sec = sum(self.throughput_buffer) / len(self.throughput_buffer)
+                    storage.put_scalar("throughput/img_per_sec", avg_img_per_sec, smoothing_hint=False)
+                    # Also log samples per epoch estimate (samples processed so far)
+                    storage.put_scalar("throughput/samples_total", self.total_samples, smoothing_hint=False)
+                    # Clear buffer after logging (keep last few for smoothing)
+                    if len(self.throughput_buffer) > self.log_period:
+                        self.throughput_buffer = self.throughput_buffer[-self.log_period:]
+
+        # Track samples per epoch
+        self.epoch_samples += batch_size
+        self.total_samples += batch_size
+
+    def after_train(self):
+        """Called after training ends."""
+        logger = logging.getLogger(__name__)
+        if self.epoch_start_time is not None:
+            epoch_time = time.perf_counter() - self.epoch_start_time
+            
+            # Calculate average throughput
+            if len(self.throughput_buffer) > 0:
+                avg_img_per_sec = sum(self.throughput_buffer) / len(self.throughput_buffer)
+            else:
+                avg_img_per_sec = 0.0
+
+            logger.info(
+                f"Training throughput: {avg_img_per_sec:.2f} img/s, "
+                f"Total samples processed: {self.total_samples}, "
+                f"Total training time: {epoch_time:.2f}s"
+            )
 
 
 class PeriodicWriter(HookBase):

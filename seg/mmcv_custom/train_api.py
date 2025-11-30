@@ -130,6 +130,11 @@ def train_segmentor(model,
     # But for backward compatibility, we'll try to register them manually
     # The runner should handle default hooks automatically if configured properly
     # Custom hooks can still be registered here if needed
+    
+    # register throughput hook
+    from .throughput_hook import ThroughputHook
+    log_interval = cfg.log_config.get('interval', 50) if cfg.log_config else 50
+    runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
 
     # an ugly walkaround to make the .log and .log.json filenames the same
     runner.timestamp = timestamp

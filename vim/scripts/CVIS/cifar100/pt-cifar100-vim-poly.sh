@@ -1,13 +1,21 @@
 #!/bin/bash
 
 # conda activate conda_visionmamba
-# cd ./projects/VisionMamba/vim;
+# Get the project root directory (3 levels up from this script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
+# Accept seed as first argument, default to 0
+SEED=${1:-0}
+
+# Change to project root to ensure relative paths work
+cd "$PROJECT_ROOT"
+
+OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
     --master_port=0 \
-    ./vim/main.py \
+    ./main.py \
     --model vim_tiny_patch16_224_bimambav2_poly \
     --batch-size 128 \
     --drop-path 0.0 \
@@ -17,5 +25,6 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --np
     --input-size 32 \
     --data-set CIFAR \
     --data-path /data/fady/datasets/cifar100 \
-    --output_dir ./output/cifar100/vim_tiny_poly \
-    --resume ./output/cifar100/vim_tiny_poly/checkpoint.pth
+    --seed $SEED \
+    --output_dir ./output/classification_logs/cifar100/vim_tiny_poly_seed${SEED} \
+    --resume ./output/classification_logs/cifar100/vim_tiny_poly_seed${SEED}/checkpoint.pth

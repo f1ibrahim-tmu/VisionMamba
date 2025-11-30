@@ -143,6 +143,10 @@ def main(args):
     """
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume=args.resume)
+    
+    # Register throughput hook
+    trainer.register_hooks([hooks.ThroughputHook(log_period=20)])
+    
     if cfg.TEST.AUG.ENABLED:
         trainer.register_hooks(
             [hooks.EvalHook(0, lambda: trainer.test_with_TTA(cfg, trainer.model))]
