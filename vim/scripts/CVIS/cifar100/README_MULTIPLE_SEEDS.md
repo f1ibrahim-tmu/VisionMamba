@@ -45,6 +45,7 @@ bash ./scripts/CVIS/cifar100/pt-cifar100-vim-zoh.sh 2
 Run a single discretization method with multiple seeds:
 
 ```bash
+# IMPORTANT: Use 'bash' not 'sh' - the script uses bash-specific features
 # Run ZOH with default seeds (0,1,2,3,4)
 bash ./scripts/CVIS/cifar100/run-single-method-seeds.sh zoh
 
@@ -61,8 +62,15 @@ bash ./scripts/CVIS/cifar100/run-single-method-seeds.sh highorder 0,1,2,3,4
 Run all discretization methods with multiple seeds sequentially:
 
 ```bash
+# IMPORTANT: Use 'bash' not 'sh' - the script uses bash-specific features
 bash ./scripts/CVIS/cifar100/run-multiple-seeds.sh
+
+# Or make it executable and run directly:
+chmod +x ./scripts/CVIS/cifar100/run-multiple-seeds.sh
+./scripts/CVIS/cifar100/run-multiple-seeds.sh
 ```
+
+**Note**: Do NOT use `sh` - use `bash` instead. The script uses bash arrays which are not supported in plain `sh`.
 
 This will run each method (ZOH, FOH, Bilinear, Poly, HighOrder, RK4) with seeds 0, 1, 2, 3, 4.
 
@@ -159,6 +167,9 @@ After running with multiple seeds, your output directory will look like:
 - **Error Bars**: If error bars (Mean ± Std) overlap between methods, the difference is not statistically significant
 
 ## Troubleshooting
+
+**Issue**: `Syntax error: "(" unexpected` when running with `sh`
+- **Solution**: Use `bash` instead of `sh`. The scripts use bash-specific features (arrays). Run: `bash ./scripts/CVIS/cifar100/run-multiple-seeds.sh`
 
 **Issue**: Script says checkpoint not found
 - **Solution**: Remove the `--resume` line or set it to empty string for fresh training

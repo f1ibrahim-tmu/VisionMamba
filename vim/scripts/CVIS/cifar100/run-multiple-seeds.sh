@@ -41,22 +41,21 @@ run_method_seeds() {
 
 # Run all methods with multiple seeds
 echo "Running Zero Order Hold (ZOH) with multiple seeds..."
-run_method_seeds "ZOH" "./scripts/CVIS/cifar100/pt-cifar100-vim-zoh.sh"
+run_method_seeds "ZOH" "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/vim/scripts/CVIS/cifar100/pt-cifar100-vim-zoh.sh"
 
 echo "Running First Order Hold (FOH) with multiple seeds..."
-run_method_seeds "FOH" "./scripts/CVIS/cifar100/pt-cifar100-vim-foh.sh"
+run_method_seeds "FOH" "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/vim/scripts/CVIS/cifar100/pt-cifar100-vim-foh.sh"
 
 echo "Running Bilinear (Tustin) Transform with multiple seeds..."
-run_method_seeds "Bilinear" "./scripts/CVIS/cifar100/pt-cifar100-vim-bilinear.sh"
-
+run_method_seeds "Bilinear" "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/vim/scripts/CVIS/cifar100/pt-cifar100-vim-bilinear.sh"
 echo "Running Polynomial Interpolation with multiple seeds..."
-run_method_seeds "Polynomial" "./scripts/CVIS/cifar100/pt-cifar100-vim-poly.sh"
+run_method_seeds "Polynomial" "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/vim/scripts/CVIS/cifar100/pt-cifar100-vim-poly.sh"
 
 echo "Running Higher-Order Hold with multiple seeds..."
-run_method_seeds "HighOrder" "./scripts/CVIS/cifar100/pt-cifar100-vim-highorder.sh"
+run_method_seeds "HighOrder" "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/vim/scripts/CVIS/cifar100/pt-cifar100-vim-highorder.sh"
 
 echo "Running Runge-Kutta 4th Order (RK4) with multiple seeds..."
-run_method_seeds "RK4" "./scripts/CVIS/cifar100/pt-cifar100-vim-rk4.sh"
+run_method_seeds "RK4" "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/vim/scripts/CVIS/cifar100/pt-cifar100-vim-rk4.sh"
 
 echo "=========================================="
 echo "All training runs with multiple seeds completed!"
