@@ -5,6 +5,7 @@ Train and eval functions used in main.py
 """
 import math
 import sys
+import time
 from typing import Iterable, Optional
 
 import torch
@@ -25,11 +26,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('img/s', utils.SmoothedValue(window_size=10, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
     
     if args.cosub:
         criterion = torch.nn.BCEWithLogitsLoss()
+    
+    epoch_start_time = time.time()
+    total_samples = 0
+    iter_start_time = time.time()
         
     # debug
     # count = 0
@@ -38,6 +44,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         # if count > 20:
         #     break
 
+        batch_size = samples.shape[0]
+        total_samples += batch_size
+        
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
@@ -93,12 +102,33 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         if model_ema is not None:
             model_ema.update(model)
 
+        # Calculate throughput (img/sec)
+        iter_time = time.time() - iter_start_time
+        if iter_time > 0:
+            img_per_sec = batch_size / iter_time
+            metric_logger.update(img_s=img_per_sec)
+        iter_start_time = time.time()
+
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    
+    # Calculate samples per epoch
+    epoch_time = time.time() - epoch_start_time
+    samples_per_epoch = total_samples
+    
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
+    
+    # Add samples/epoch to the stats
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    stats['samples/epoch'] = samples_per_epoch
+    stats['epoch_time'] = epoch_time
+    
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    if 'img_s' in stats:
+        print(f"Throughput: {stats['img_s']:.2f} img/s, Samples per epoch: {samples_per_epoch}")
+    
+    return stats
 
 
 @torch.no_grad()

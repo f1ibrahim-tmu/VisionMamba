@@ -104,6 +104,11 @@ def train_segmentor(model,
     runner.register_training_hooks(cfg.lr_config, cfg.optimizer_config,
                                    cfg.checkpoint_config, cfg.log_config,
                                    cfg.get('momentum_config', None))
+    
+    # register throughput hook
+    from .throughput_hook import ThroughputHook
+    log_interval = cfg.log_config.get('interval', 50) if cfg.log_config else 50
+    runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
 
     # an ugly walkaround to make the .log and .log.json filenames the same
     runner.timestamp = timestamp
