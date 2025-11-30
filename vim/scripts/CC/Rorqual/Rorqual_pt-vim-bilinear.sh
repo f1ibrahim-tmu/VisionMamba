@@ -3,6 +3,9 @@
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
 
+# Accept seed as first argument, default to 0
+SEED=${1:-0}
+
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_bilinear \
@@ -14,5 +17,6 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --input-size 32 \
     --data-set CIFAR \
     --data-path /home/f7ibrahi/links/scratch/dataset/cifar100 \
-    --output_dir ./output/classification_logs/vim_tiny_bilinear \
-    --resume ./output/classification_logs/vim_tiny_bilinear/checkpoint.pth
+    --seed $SEED \
+    --output_dir ./output/classification_logs/vim_tiny_bilinear_seed${SEED} \
+    --resume ./output/classification_logs/vim_tiny_bilinear_seed${SEED}/checkpoint.pth
