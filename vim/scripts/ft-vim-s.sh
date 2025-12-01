@@ -10,7 +10,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --warmup-lr 1e-5 \
     --drop-path 0.0 \
     --weight-decay 1e-8 \
-    --num_workers 25 \
+    --num_workers 2 \
     --data-path <path_to_IN1K_dataset> \
     --output_dir ./output/vim_small_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
     --epochs 30 \

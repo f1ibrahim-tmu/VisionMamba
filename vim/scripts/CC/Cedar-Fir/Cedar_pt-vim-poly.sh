@@ -10,7 +10,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 4 \
+    --num_workers 2 \
     --data-path /home/f7ibrahi/projects/def-wangcs/dataset/ImageNet/ILSVRC2012 \
     --output_dir ./output/classification_logs/vim_tiny_poly \
     --resume ./output/classification_logs/vim_tiny_poly/checkpoint.pth

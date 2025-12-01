@@ -2,7 +2,7 @@
 # This script runs quick testing for all discretization methods with fewer resources
 
 # Common parameters for testing
-COMMON_PARAMS="--batch-size 32 --epochs 5 --weight-decay 0.1 --num_workers 0 --data-path /data/fady/datasets/imagenet-1k --no_amp"
+COMMON_PARAMS="--batch-size 32 --epochs 5 --weight-decay 0.1 --num_workers 2 --data-path /data/fady/datasets/imagenet-1k --no_amp"
 
 cd ./projects/VisionMamba/vim;
 
