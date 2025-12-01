@@ -4,8 +4,9 @@
 # cd ./projects/VisionMamba/vim;
 
 # WARNING: RK4 discretization has known SIGBUS issues with distributed training on some systems
-# SIGBUS errors during distributed barrier suggest system-level memory alignment issues
-# If distributed training fails, try single-GPU training (uncomment the single-GPU section below)
+# SIGBUS errors during distributed barrier indicate system-level memory alignment issues
+# Single-GPU training is used by default to avoid these issues
+# If you need distributed training, you may need to investigate system-level memory configuration
 
 # Disable shared memory for PyTorch to avoid alignment issues
 export TORCH_SHARED_MEMORY_DISABLE=1
@@ -22,18 +23,11 @@ export LD_PRELOAD=""
 
 # Reduce OMP threads to avoid memory contention
 # RK4 is memory-intensive, so we use fewer CPU threads
-# SIGBUS during distributed barrier suggests system-level issues
-# If this fails, try single-GPU training (see commented section below)
 
-# Distributed training with 2 GPUs (default)
-# If this fails with SIGBUS, use the single-GPU fallback below
-OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
-    --rdzv-backend=c10d \
-    --rdzv-endpoint=localhost:0 \
-    --master_port=0 \
-    ./vim/main.py \
+# Single-GPU training (default - avoids SIGBUS issues with distributed training)
+OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 python ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_rk4 \
-    --batch-size 8 \
+    --batch-size 16 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
@@ -42,10 +36,16 @@ OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --npr
     --output_dir ./output/vim_tiny_rk4 \
     --resume ./output/vim_tiny_rk4/checkpoint.pth
 
-# SINGLE-GPU FALLBACK: If distributed training fails with SIGBUS, uncomment this and comment out the distributed section above
-# OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 python ./vim/main.py \
+# DISTRIBUTED TRAINING (commented out due to SIGBUS issues)
+# If you need distributed training, uncomment below and comment out single-GPU section above
+# Note: This may still fail with SIGBUS on systems with memory alignment issues
+# OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
+#     --rdzv-backend=c10d \
+#     --rdzv-endpoint=localhost:0 \
+#     --master_port=0 \
+#     ./vim/main.py \
 #     --model vim_tiny_patch16_224_bimambav2_rk4 \
-#     --batch-size 16 \
+#     --batch-size 8 \
 #     --drop-path 0.0 \
 #     --weight-decay 0.05 \
 #     --lr 0.001 \
