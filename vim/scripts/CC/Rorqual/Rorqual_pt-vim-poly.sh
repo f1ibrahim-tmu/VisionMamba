@@ -23,5 +23,5 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --data-set CIFAR \
     --data-path /home/f7ibrahi/links/scratch/dataset/cifar100 \
     --seed $SEED \
-    --output_dir ./output/classification_logs/vim_tiny_poly_seed${SEED} \
-    --resume ./output/classification_logs/vim_tiny_poly_seed${SEED}/checkpoint.pth
+    --output_dir /home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_poly_seed${SEED} \
+    --resume /home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_poly_seed${SEED}/checkpoint.pth
