@@ -13,7 +13,7 @@ OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 1 \
+    --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
     --output_dir ./output/vim_tiny_zoh \
     --resume ./output/vim_tiny_zoh/checkpoint.pth
