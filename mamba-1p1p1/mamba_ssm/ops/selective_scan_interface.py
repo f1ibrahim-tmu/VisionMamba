@@ -2,7 +2,11 @@
 
 import torch
 import torch.nn.functional as F
-from torch.amp import custom_bwd, custom_fwd
+# Compatibility: custom_bwd/custom_fwd moved from torch.cuda.amp to torch.amp in PyTorch 2.1.0
+try:
+    from torch.amp import custom_bwd, custom_fwd
+except ImportError:
+    from torch.cuda.amp import custom_bwd, custom_fwd
 
 from einops import rearrange, repeat
 
