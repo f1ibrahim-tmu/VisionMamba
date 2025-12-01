@@ -11,15 +11,24 @@ except ImportError:
     _has_device_type_arg = False
 
 # Compatibility wrappers for device_type argument (only supported in PyTorch 2.1.0+)
-def _custom_fwd(*args, **kwargs):
-    if not _has_device_type_arg and 'device_type' in kwargs:
-        kwargs.pop('device_type')
-    return custom_fwd(*args, **kwargs)
-
-def _custom_bwd(*args, **kwargs):
-    if not _has_device_type_arg and 'device_type' in kwargs:
-        kwargs.pop('device_type')
-    return custom_bwd(*args, **kwargs)
+# In older PyTorch, custom_fwd/custom_bwd are decorators themselves, not decorator factories
+if _has_device_type_arg:
+    # PyTorch >= 2.1.0: custom_fwd/custom_bwd are decorator factories that accept device_type
+    def _custom_fwd(*args, **kwargs):
+        return custom_fwd(*args, **kwargs)
+    
+    def _custom_bwd(*args, **kwargs):
+        return custom_bwd(*args, **kwargs)
+else:
+    # PyTorch < 2.1.0: custom_fwd/custom_bwd are decorators themselves
+    # We need to return them directly, ignoring any arguments
+    def _custom_fwd(*args, **kwargs):
+        # Ignore all arguments and return the decorator directly
+        return custom_fwd
+    
+    def _custom_bwd(*args, **kwargs):
+        # Ignore all arguments and return the decorator directly
+        return custom_bwd
 
 from einops import rearrange, repeat
 
