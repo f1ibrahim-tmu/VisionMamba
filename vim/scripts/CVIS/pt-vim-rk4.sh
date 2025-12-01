@@ -3,9 +3,9 @@
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
 
-# Fix for Bus error (SIGBUS) in distributed training with RK4
-# RK4 discretization uses memory-intensive operations that can cause alignment issues
-# SIGBUS errors may indicate hardware/memory issues - try with fewer GPUs if this fails
+# WARNING: RK4 discretization has known SIGBUS issues with distributed training on some systems
+# SIGBUS errors during distributed barrier suggest system-level memory alignment issues
+# If distributed training fails, try single-GPU training (uncomment the single-GPU section below)
 
 # Disable shared memory for PyTorch to avoid alignment issues
 export TORCH_SHARED_MEMORY_DISABLE=1
@@ -22,8 +22,11 @@ export LD_PRELOAD=""
 
 # Reduce OMP threads to avoid memory contention
 # RK4 is memory-intensive, so we use fewer CPU threads
-# SIGBUS during import suggests system-level issues - using 2 GPUs by default to reduce initialization pressure
-# If this works, you can try increasing to 4 GPUs: CUDA_VISIBLE_DEVICES=0,1,2,3 --nproc_per_node=4
+# SIGBUS during distributed barrier suggests system-level issues
+# If this fails, try single-GPU training (see commented section below)
+
+# Distributed training with 2 GPUs (default)
+# If this fails with SIGBUS, use the single-GPU fallback below
 OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
@@ -38,3 +41,15 @@ OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --npr
     --data-path /data/fady/datasets/imagenet-1k \
     --output_dir ./output/vim_tiny_rk4 \
     --resume ./output/vim_tiny_rk4/checkpoint.pth
+
+# SINGLE-GPU FALLBACK: If distributed training fails with SIGBUS, uncomment this and comment out the distributed section above
+# OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 python ./vim/main.py \
+#     --model vim_tiny_patch16_224_bimambav2_rk4 \
+#     --batch-size 16 \
+#     --drop-path 0.0 \
+#     --weight-decay 0.05 \
+#     --lr 0.001 \
+#     --num_workers 0 \
+#     --data-path /data/fady/datasets/imagenet-1k \
+#     --output_dir ./output/vim_tiny_rk4 \
+#     --resume ./output/vim_tiny_rk4/checkpoint.pth
