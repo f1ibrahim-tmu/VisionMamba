@@ -17,7 +17,7 @@ export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 # RK4 is more memory-intensive due to its 4-stage computations
 BATCH_SIZE=32  # Reduced from 128 to avoid memory issues
 
-OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
+OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
     --master_port=0 \
@@ -27,7 +27,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run 
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 0 \
+    --num_workers 4 \
     --data-path /data/fady/datasets/imagenet-1k \
     --output_dir ./output/vim_tiny_rk4 \
     --resume ./output/vim_tiny_rk4/checkpoint.pth

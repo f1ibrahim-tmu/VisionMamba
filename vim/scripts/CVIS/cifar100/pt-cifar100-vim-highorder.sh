@@ -11,17 +11,17 @@ SEED=${1:-0}
 # Change to project root to ensure relative paths work
 cd "$PROJECT_ROOT"
 
-OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
+OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
     --master_port=0 \
     ./main.py \
     --model vim_tiny_patch16_224_bimambav2_highorder \
-    --batch-size 128 \
+    --batch-size 256 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 0 \
+    --num_workers 4 \
     --input-size 32 \
     --data-set CIFAR \
     --data-path /data/fady/datasets/cifar100 \

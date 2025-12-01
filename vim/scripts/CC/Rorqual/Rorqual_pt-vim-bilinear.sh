@@ -18,7 +18,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 0 \
+    --num_workers 4 \
     --input-size 32 \
     --data-set CIFAR \
     --data-path /home/f7ibrahi/links/scratch/dataset/cifar100 \
