@@ -22,8 +22,9 @@ export LD_PRELOAD=""
 
 # Reduce OMP threads to avoid memory contention
 # RK4 is memory-intensive, so we use fewer CPU threads
-# If SIGBUS persists, try reducing to 2 GPUs: CUDA_VISIBLE_DEVICES=0,1 --nproc_per_node=2
-OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
+# SIGBUS during import suggests system-level issues - using 2 GPUs by default to reduce initialization pressure
+# If this works, you can try increasing to 4 GPUs: CUDA_VISIBLE_DEVICES=0,1,2,3 --nproc_per_node=4
+OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     --rdzv-backend=c10d \
     --rdzv-endpoint=localhost:0 \
     --master_port=0 \
