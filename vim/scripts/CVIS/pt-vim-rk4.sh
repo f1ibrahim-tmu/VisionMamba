@@ -27,7 +27,7 @@ export LD_PRELOAD=""
 # Single-GPU training (default - avoids SIGBUS issues with distributed training)
 OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 python ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_rk4 \
-    --batch-size 16 \
+    --batch-size 128 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
