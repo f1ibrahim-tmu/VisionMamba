@@ -9,11 +9,11 @@ OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --master_port=0 \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_poly \
-    --batch-size 256 \
+    --batch-size 128 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 2 \
+    --num_workers 1 \
     --data-path /data/fady/datasets/imagenet-1k \
     --output_dir ./output/vim_tiny_poly \
     --resume ./output/vim_tiny_poly/checkpoint.pth
