@@ -12,7 +12,11 @@ from mmengine.config import Config, DictAction
 from mmengine.utils import get_git_hash
 
 from mmseg import __version__
-from mmseg.apis import set_random_seed
+try:
+    from mmengine.runner import set_random_seed
+except ImportError:
+    # Fallback for older versions or if not available
+    from mmcv_custom.train_api import set_random_seed
 from mmcv_custom import train_segmentor
 from mmseg.datasets import build_dataset
 from mmseg.models import build_segmentor
