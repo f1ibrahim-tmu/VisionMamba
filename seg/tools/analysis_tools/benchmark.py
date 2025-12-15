@@ -5,13 +5,13 @@ import torch
 from mmengine.config import Config
 from mmengine.runner import load_checkpoint
 
-from mmseg.datasets import build_dataset
-# MMSegmentation ≥ 1.2: build_dataloader moved to mmengine
+# MMSegmentation ≥ 1.2: build_dataset and build_dataloader moved to mmengine.dataset
 try:
-    from mmengine.dataset import build_dataloader
+    # MMSeg >= 1.2
+    from mmengine.dataset import build_dataset, build_dataloader
 except ImportError:
-    # Fallback for older versions
-    from mmseg.datasets import build_dataloader
+    # Older MMSeg
+    from mmseg.datasets import build_dataset, build_dataloader
 from mmseg.models import build_segmentor
 
 import sys, os

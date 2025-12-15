@@ -18,7 +18,13 @@ except ImportError:
     # Fallback for older versions or if not available
     from mmcv_custom.train_api import set_random_seed
 from mmcv_custom import train_segmentor
-from mmseg.datasets import build_dataset
+# MMSegmentation ≥ 1.2: build_dataset moved to mmengine.dataset
+try:
+    # MMSeg >= 1.2
+    from mmengine.dataset import build_dataset
+except ImportError:
+    # Older MMSeg
+    from mmseg.datasets import build_dataset
 from mmseg.models import build_segmentor
 from mmseg.utils import collect_env, get_root_logger
 

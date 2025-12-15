@@ -10,18 +10,18 @@ try:
     from mmseg.engine import SegEvaluator
 except ImportError:
     SegEvaluator = None
-from mmseg.datasets import build_dataset
 from mmseg.utils import get_root_logger
-# MMSegmentation ≥ 1.2: build_dataloader moved to mmengine.dataset
-# MMEngine's build_dataloader works with config dicts
+# MMSegmentation ≥ 1.2: build_dataset and build_dataloader moved to mmengine.dataset
 try:
-    from mmengine.dataset import build_dataloader
+    # MMSeg >= 1.2
+    from mmengine.dataset import build_dataset, build_dataloader
 except ImportError:
-    # Fallback for older MMSegmentation versions
+    # Older MMSeg
     try:
-        from mmseg.datasets import build_dataloader
+        from mmseg.datasets import build_dataset, build_dataloader
     except ImportError:
-        # If neither works, we'll use Runner.build_dataloader
+        # If build_dataloader doesn't exist, import only build_dataset
+        from mmseg.datasets import build_dataset
         build_dataloader = None
 
 
