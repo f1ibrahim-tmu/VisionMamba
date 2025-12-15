@@ -22,7 +22,7 @@
 - Removed `from mmseg.apis import multi_gpu_test, single_gpu_test`
 - Replaced with `from mmengine.runner import Runner`
 - Replaced `multi_gpu_test()` and `single_gpu_test()` calls with `runner.test()`
-- Updated to use `MMDataParallel` and `MMDistributedDataParallel` from mmengine
+- Updated to use native PyTorch `DataParallel`/`DistributedDataParallel` (MMEngine ≥ 0.10 removed MMDataParallel)
 - Configured `SegEvaluator` for evaluation
 - Maintained backward compatibility for show/format/out options (with warnings)
 

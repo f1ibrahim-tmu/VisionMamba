@@ -3,7 +3,6 @@ import time
 
 import torch
 from mmengine.config import Config
-from mmengine.model import MMDataParallel
 from mmengine.runner import load_checkpoint
 
 from mmseg.datasets import build_dataloader, build_dataset
@@ -94,8 +93,10 @@ def main():
         model = build_segmentor(cfg.model, test_cfg=cfg.get('benchmark_cfg'))
     # load_checkpoint(model, args.checkpoint, map_location='cpu')
 
-    model = MMDataParallel(
-        model,#.to(torch.float16), 
+    # MMEngine ≥ 0.10: MMDataParallel is removed, use native PyTorch DataParallel
+    from torch.nn import DataParallel
+    model = DataParallel(
+        model.to('cuda:0'),
         device_ids=[0])
 
     print(f"Number of parameters: {num_params(model)}")

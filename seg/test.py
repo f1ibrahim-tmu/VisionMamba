@@ -24,7 +24,6 @@ from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.models import build_segmentor
 from mmseg.utils import build_ddp, build_dp, get_device, setup_multi_processes
 from mmengine.runner import Runner
-from mmengine.model import MMDataParallel, MMDistributedDataParallel
 
 from backbone import vim
 
@@ -314,6 +313,8 @@ def main():
             test_evaluator = evaluator_cfg
 
     # Set up device and model wrapping
+    # MMEngine ≥ 0.10: MMDataParallel and MMDistributedDataParallel are removed
+    # Use native PyTorch wrappers or let Runner handle it
     cfg.device = get_device()
     if not distributed:
         warnings.warn(
@@ -326,11 +327,20 @@ def main():
             assert digit_version(mmengine.__version__) >= digit_version('0.10.0'), \
                 'Please use MMEngine >= 0.10.0 for CPU training!'
         model = revert_sync_batchnorm(model)
-        model = MMDataParallel(model, device_ids=cfg.gpu_ids)
+        # Use native PyTorch DataParallel for single-node multi-GPU
+        if len(cfg.gpu_ids) > 1:
+            from torch.nn import DataParallel
+            model = DataParallel(model, device_ids=cfg.gpu_ids)
+        else:
+            # Single GPU - just move to device
+            model = model.to(cfg.device)
     else:
-        model = MMDistributedDataParallel(
-            model,
+        # For distributed, use native PyTorch DDP
+        from torch.nn.parallel import DistributedDataParallel
+        model = DistributedDataParallel(
+            model.to(cfg.device),
             device_ids=[int(os.environ['LOCAL_RANK'])],
+            output_device=int(os.environ['LOCAL_RANK']),
             broadcast_buffers=False)
 
     # Create Runner for testing

@@ -3,7 +3,6 @@ import warnings
 
 import numpy as np
 import torch
-from mmengine.model import MMDataParallel, MMDistributedDataParallel
 from mmengine.optim import build_optim_wrapper
 from mmengine.runner import Runner
 # MMSegmentation 1.0.0+ moved eval hooks to mmseg.engine
@@ -133,19 +132,19 @@ def train_segmentor(model,
     
     optim_wrapper = build_optim_wrapper(model, optim_wrapper_cfg)
 
-    # put model on gpus
-    if distributed:
-        find_unused_parameters = cfg.get('find_unused_parameters', False)
-        # Sets the `find_unused_parameters` parameter in
-        # torch.nn.parallel.DistributedDataParallel
-        model = MMDistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False,
-            find_unused_parameters=find_unused_parameters)
-    else:
-        model = MMDataParallel(
-            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+    # MMEngine ≥ 0.10: MMDataParallel and MMDistributedDataParallel are removed
+    # Runner handles model wrapping automatically based on distributed setting
+    # We just need to move model to device - Runner will handle the rest
+    if torch.cuda.is_available():
+        if distributed:
+            # For distributed training, Runner will wrap with DDP automatically
+            # Just ensure model is on the correct device
+            device = torch.device(f'cuda:{torch.cuda.current_device()}')
+            model = model.to(device)
+        else:
+            # For single GPU or DataParallel, move to first GPU
+            device = torch.device(f'cuda:{cfg.gpu_ids[0]}')
+            model = model.to(device)
 
     # MMEngine ≥ 0.7 uses Runner with train_cfg/val_cfg/test_cfg
     # Convert old runner config to new format
