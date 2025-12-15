@@ -20,7 +20,13 @@ try:
 except ImportError:
     # Fallback for older versions
     from mmseg import digit_version
-from mmseg.datasets import build_dataloader, build_dataset
+from mmseg.datasets import build_dataset
+# MMSegmentation ≥ 1.2: build_dataloader moved to mmengine
+try:
+    from mmengine.dataset import build_dataloader
+except ImportError:
+    # Fallback for older versions
+    from mmseg.datasets import build_dataloader
 from mmseg.models import build_segmentor
 from mmseg.utils import build_ddp, build_dp, get_device, setup_multi_processes
 from mmengine.runner import Runner
@@ -198,28 +204,48 @@ def main():
 
     # build the dataset and dataloader
     dataset = build_dataset(cfg.data.test)
-    # The default loader config
-    loader_cfg = dict(
-        # cfg.gpus will be ignored if distributed
-        num_gpus=len(cfg.gpu_ids),
-        dist=distributed,
-        shuffle=False)
-    # The overall dataloader settings
-    loader_cfg.update({
-        k: v
-        for k, v in cfg.data.items() if k not in [
-            'train', 'val', 'test', 'train_dataloader', 'val_dataloader',
-            'test_dataloader'
-        ]
-    })
-    test_loader_cfg = {
-        **loader_cfg,
-        'samples_per_gpu': 1,
-        'shuffle': False,  # Not shuffle by default
-        **cfg.data.get('test_dataloader', {})
-    }
-    # build the dataloader
-    test_dataloader = build_dataloader(dataset, **test_loader_cfg)
+    
+    # Check if explicit test_dataloader config exists (MMEngine format)
+    if hasattr(cfg.data, 'test_dataloader') and cfg.data.test_dataloader is not None:
+        test_dataloader_cfg = cfg.data.test_dataloader.copy()
+        if 'dataset' not in test_dataloader_cfg:
+            test_dataloader_cfg['dataset'] = dataset
+        elif isinstance(test_dataloader_cfg['dataset'], dict):
+            test_dataloader_cfg['dataset'] = build_dataset(test_dataloader_cfg['dataset'])
+        # MMEngine's build_dataloader works with config dicts
+        try:
+            from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+            test_dataloader = mmengine_build_dataloader(test_dataloader_cfg)
+        except ImportError:
+            test_dataloader = Runner.build_dataloader(test_dataloader_cfg)
+    else:
+        # Legacy format: convert to MMEngine config format
+        test_dataloader_cfg = dict(
+            dataset=dataset,
+            batch_size=1,
+            num_workers=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+            sampler=dict(type='DefaultSampler', shuffle=False),
+            drop_last=False
+        )
+        # Try MMEngine's build_dataloader, fallback to Runner.build_dataloader
+        try:
+            from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+            test_dataloader = mmengine_build_dataloader(test_dataloader_cfg)
+        except ImportError:
+            # Fallback: try legacy mmseg build_dataloader
+            try:
+                from mmseg.datasets import build_dataloader as mmseg_build_dataloader
+                test_dataloader = mmseg_build_dataloader(
+                    dataset,
+                    samples_per_gpu=1,
+                    workers_per_gpu=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                    num_gpus=len(cfg.gpu_ids),
+                    dist=distributed,
+                    shuffle=False
+                )
+            except ImportError:
+                # Last resort: use Runner.build_dataloader
+                test_dataloader = Runner.build_dataloader(test_dataloader_cfg)
 
     # build the model and load checkpoint
     cfg.model.train_cfg = None

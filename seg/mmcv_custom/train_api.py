@@ -10,8 +10,19 @@ try:
     from mmseg.engine import SegEvaluator
 except ImportError:
     SegEvaluator = None
-from mmseg.datasets import build_dataloader, build_dataset
+from mmseg.datasets import build_dataset
 from mmseg.utils import get_root_logger
+# MMSegmentation ≥ 1.2: build_dataloader moved to mmengine.dataset
+# MMEngine's build_dataloader works with config dicts
+try:
+    from mmengine.dataset import build_dataloader
+except ImportError:
+    # Fallback for older MMSegmentation versions
+    try:
+        from mmseg.datasets import build_dataloader
+    except ImportError:
+        # If neither works, we'll use Runner.build_dataloader
+        build_dataloader = None
 
 
 def set_random_seed(seed, deterministic=False):
@@ -65,17 +76,43 @@ def train_segmentor(model,
             # Build dataset from dict config
             train_dataloader_cfg['dataset'] = build_dataset(train_dataloader_cfg['dataset'])
         
-        # Runner can build from config, but we can also build it here for compatibility
-        # Build dataloader manually to ensure compatibility with mmseg's build_dataloader
-        train_dataloader = build_dataloader(
-            train_dataloader_cfg['dataset'],
-            train_dataloader_cfg.get('batch_size', 4),
-            train_dataloader_cfg.get('num_workers', 4),
-            len(cfg.gpu_ids),
-            dist=distributed,
-            seed=cfg.seed,
-            drop_last=train_dataloader_cfg.get('drop_last', True)
-        )
+        # MMEngine's build_dataloader works with config dicts
+        # Ensure sampler is set if not provided
+        if 'sampler' not in train_dataloader_cfg:
+            train_dataloader_cfg['sampler'] = dict(type='InfiniteSampler', shuffle=True)
+        
+        # Try MMEngine's build_dataloader (takes config dict)
+        try:
+            from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+            train_dataloader = mmengine_build_dataloader(train_dataloader_cfg, seed=cfg.seed)
+        except (ImportError, TypeError):
+            # Fallback: try Runner.build_dataloader or legacy mmseg API
+            try:
+                train_dataloader = Runner.build_dataloader(train_dataloader_cfg, seed=cfg.seed)
+            except (AttributeError, TypeError):
+                # Last resort: try legacy mmseg build_dataloader with positional args
+                if build_dataloader is not None:
+                    train_dataloader = build_dataloader(
+                        train_dataloader_cfg['dataset'],
+                        train_dataloader_cfg.get('batch_size', 4),
+                        train_dataloader_cfg.get('num_workers', 4),
+                        len(cfg.gpu_ids),
+                        dist=distributed,
+                        seed=cfg.seed,
+                        drop_last=train_dataloader_cfg.get('drop_last', True)
+                    )
+                else:
+                    # Manual construction as last resort
+                    from torch.utils.data import DataLoader
+                    from mmengine.dataset import InfiniteSampler
+                    sampler = InfiniteSampler(train_dataloader_cfg['dataset'], shuffle=True)
+                    train_dataloader = DataLoader(
+                        train_dataloader_cfg['dataset'],
+                        batch_size=train_dataloader_cfg.get('batch_size', 4),
+                        num_workers=train_dataloader_cfg.get('num_workers', 4),
+                        sampler=sampler,
+                        drop_last=train_dataloader_cfg.get('drop_last', True)
+                    )
         
         if validate and hasattr(cfg, 'val_dataloader') and cfg.val_dataloader is not None:
             val_dataloader_cfg = cfg.val_dataloader.copy()
@@ -90,31 +127,132 @@ def train_segmentor(model,
                 val_dataloader_cfg['dataset'] = build_dataset(val_dataloader_cfg['dataset'])
             
             if 'dataset' in val_dataloader_cfg:
-                val_dataloader = build_dataloader(
-                    val_dataloader_cfg['dataset'],
-                    val_dataloader_cfg.get('batch_size', 1),
-                    val_dataloader_cfg.get('num_workers', 4),
-                    len(cfg.gpu_ids),
-                    dist=distributed,
-                    seed=cfg.seed,
-                    drop_last=False
-                )
+                # Ensure sampler is set if not provided
+                if 'sampler' not in val_dataloader_cfg:
+                    val_dataloader_cfg['sampler'] = dict(type='DefaultSampler', shuffle=False)
+                
+                # Try MMEngine's build_dataloader (takes config dict)
+                try:
+                    from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+                    val_dataloader = mmengine_build_dataloader(val_dataloader_cfg, seed=cfg.seed)
+                except (ImportError, TypeError):
+                    # Fallback: try Runner.build_dataloader or legacy mmseg API
+                    try:
+                        val_dataloader = Runner.build_dataloader(val_dataloader_cfg, seed=cfg.seed)
+                    except (AttributeError, TypeError):
+                        # Last resort: try legacy mmseg build_dataloader
+                        if build_dataloader is not None:
+                            val_dataloader = build_dataloader(
+                                val_dataloader_cfg['dataset'],
+                                val_dataloader_cfg.get('batch_size', 1),
+                                val_dataloader_cfg.get('num_workers', 4),
+                                len(cfg.gpu_ids),
+                                dist=distributed,
+                                seed=cfg.seed,
+                                drop_last=False
+                            )
+                        else:
+                            # Manual construction
+                            from torch.utils.data import DataLoader
+                            from mmengine.dataset import DefaultSampler
+                            sampler = DefaultSampler(val_dataloader_cfg['dataset'], shuffle=False)
+                            val_dataloader = DataLoader(
+                                val_dataloader_cfg['dataset'],
+                                batch_size=val_dataloader_cfg.get('batch_size', 1),
+                                num_workers=val_dataloader_cfg.get('num_workers', 4),
+                                sampler=sampler,
+                                drop_last=False
+                            )
     else:
         # Legacy format: build from dataset objects and samples_per_gpu
         dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
-        data_loaders = [
-            build_dataloader(
-                ds,
-                cfg.data.samples_per_gpu if hasattr(cfg.data, 'samples_per_gpu') else 4,
-                cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
-                # cfg.gpus will be ignored if distributed
-                len(cfg.gpu_ids),
-                dist=distributed,
-                seed=cfg.seed,
-                drop_last=True) for ds in dataset
-        ]
-        train_dataloader = data_loaders[0]
-        val_dataloader = data_loaders[1] if len(data_loaders) > 1 and validate else None
+        
+        # Convert legacy format to MMEngine config format
+        train_dataset = dataset[0]
+        train_dataloader_cfg = dict(
+            dataset=train_dataset,
+            batch_size=cfg.data.samples_per_gpu if hasattr(cfg.data, 'samples_per_gpu') else 4,
+            num_workers=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+            sampler=dict(type='InfiniteSampler', shuffle=True),
+            drop_last=True
+        )
+        
+        # Try MMEngine's build_dataloader first
+        try:
+            from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+            train_dataloader = mmengine_build_dataloader(train_dataloader_cfg, seed=cfg.seed)
+        except (ImportError, TypeError):
+            # Fallback: try Runner.build_dataloader
+            try:
+                train_dataloader = Runner.build_dataloader(train_dataloader_cfg, seed=cfg.seed)
+            except (AttributeError, TypeError):
+                # Last resort: try legacy mmseg build_dataloader
+                if build_dataloader is not None:
+                    train_dataloader = build_dataloader(
+                        train_dataset,
+                        cfg.data.samples_per_gpu if hasattr(cfg.data, 'samples_per_gpu') else 4,
+                        cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                        len(cfg.gpu_ids),
+                        dist=distributed,
+                        seed=cfg.seed,
+                        drop_last=True
+                    )
+                else:
+                    # Manual construction
+                    from torch.utils.data import DataLoader
+                    from mmengine.dataset import InfiniteSampler
+                    sampler = InfiniteSampler(train_dataset, shuffle=True)
+                    train_dataloader = DataLoader(
+                        train_dataset,
+                        batch_size=cfg.data.samples_per_gpu if hasattr(cfg.data, 'samples_per_gpu') else 4,
+                        num_workers=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                        sampler=sampler,
+                        drop_last=True
+                    )
+        
+        if len(dataset) > 1 and validate:
+            val_dataset = dataset[1]
+            val_dataloader_cfg = dict(
+                dataset=val_dataset,
+                batch_size=1,
+                num_workers=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                sampler=dict(type='DefaultSampler', shuffle=False),
+                drop_last=False
+            )
+            # Try MMEngine's build_dataloader first
+            try:
+                from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+                val_dataloader = mmengine_build_dataloader(val_dataloader_cfg, seed=cfg.seed)
+            except (ImportError, TypeError):
+                # Fallback: try Runner.build_dataloader
+                try:
+                    val_dataloader = Runner.build_dataloader(val_dataloader_cfg, seed=cfg.seed)
+                except (AttributeError, TypeError):
+                    # Last resort: try legacy mmseg build_dataloader
+                    if build_dataloader is not None:
+                        val_dataloader = build_dataloader(
+                            val_dataset,
+                            1,
+                            cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                            len(cfg.gpu_ids),
+                            dist=distributed,
+                            seed=cfg.seed,
+                            drop_last=False
+                        )
+                    else:
+                        # Manual construction
+                        from torch.utils.data import DataLoader
+                        from mmengine.dataset import DefaultSampler
+                        sampler = DefaultSampler(val_dataset, shuffle=False)
+                        val_dataloader = DataLoader(
+                            val_dataset,
+                            batch_size=1,
+                            num_workers=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                            sampler=sampler,
+                            drop_last=False
+                        )
+        else:
+            val_dataloader = None
 
     # build optimizer - MMEngine uses optim_wrapper
     if hasattr(cfg, 'optim_wrapper'):
