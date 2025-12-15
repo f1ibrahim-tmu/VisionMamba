@@ -50,24 +50,25 @@ optimizer = dict(_delete_=True,
                  paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
                 )
 
-lr_config = dict(_delete_=True, policy='poly',
-                 warmup='linear',
-                 warmup_iters=1500,
-                 warmup_ratio=1e-6,
-                 power=1.0, min_lr=0.0, by_epoch=False)
+optim_wrapper = dict(_delete_=True, type='OptimWrapper', optimizer=optimizer)
+
+param_scheduler = [
+    dict(
+        type='LinearLR',
+        start_factor=1e-6,
+        by_epoch=False,
+        begin=0,
+        end=1500
+    ),
+    dict(
+        type='PolyLR',
+        eta_min=0.0,
+        power=1.0,
+        begin=1500,
+        end=60000,
+        by_epoch=False
+    )
+]
 
 # By default, models are trained on 4 GPUs with 8 images per GPU
 data=dict(samples_per_gpu=8, workers_per_gpu=16)
-
-runner = dict(type='IterBasedRunnerAmp')
-
-# do not use mmdet version fp16
-fp16 = None
-optimizer_config = dict(
-    type="DistOptimizerHook",
-    update_interval=1,
-    grad_clip=None,
-    coalesce=True,
-    bucket_size_mb=-1,
-    use_fp16=False,
-)

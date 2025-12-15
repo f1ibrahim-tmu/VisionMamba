@@ -6,19 +6,13 @@ import torch
 from mmengine.model import MMDataParallel, MMDistributedDataParallel
 from mmengine.optim import build_optim_wrapper
 from mmengine.runner import Runner
-
 # MMSegmentation 1.0.0+ moved eval hooks to mmseg.engine
 try:
-    from mmseg.engine import DistEvalHook, EvalHook
+    from mmseg.engine import SegEvaluator
 except ImportError:
-    # Fallback for older versions
-    from mmseg.core import DistEvalHook, EvalHook
+    SegEvaluator = None
 from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.utils import get_root_logger
-try:
-    import apex
-except:
-    print('apex is not installed')
 
 
 def set_random_seed(seed, deterministic=False):
@@ -64,26 +58,21 @@ def train_segmentor(model,
             drop_last=True) for ds in dataset
     ]
 
-    # build optimizer - MMCV 2.x uses optim_wrapper instead of optimizer
-    # For backward compatibility, we'll build optimizer from cfg.optimizer
+    # build optimizer - MMEngine uses optim_wrapper
     if hasattr(cfg, 'optim_wrapper'):
-        optim_wrapper = build_optim_wrapper(model, cfg.optim_wrapper)
-        optimizer = optim_wrapper.optimizer
+        optim_wrapper_cfg = cfg.optim_wrapper
     else:
-        # Fallback to old API if optim_wrapper not available
-        from mmengine.optim import build_optim_wrapper
-        optim_wrapper_cfg = dict(type='OptimWrapper', optimizer=cfg.optimizer)
-        optim_wrapper = build_optim_wrapper(model, optim_wrapper_cfg)
-        optimizer = optim_wrapper.optimizer
-
-    # use apex fp16 optimizer
-    if cfg.optimizer_config.get("type", None) and cfg.optimizer_config["type"] == "DistOptimizerHook":
-        if cfg.optimizer_config.get("use_fp16", False):
-            model, optimizer = apex.amp.initialize(
-                model.cuda(), optimizer, opt_level="O1")
-            for m in model.modules():
-                if hasattr(m, "fp16_enabled"):
-                    m.fp16_enabled = True
+        # Convert old optimizer config to optim_wrapper format
+        optim_wrapper_cfg = dict(
+            type='OptimWrapper',
+            optimizer=cfg.optimizer,
+            clip_grad=cfg.optimizer_config.get('grad_clip', None) if hasattr(cfg, 'optimizer_config') else None
+        )
+        # Handle FP16 - use native PyTorch AMP (AmpOptimWrapper)
+        if hasattr(cfg, 'optimizer_config') and cfg.optimizer_config.get("use_fp16", False):
+            optim_wrapper_cfg['type'] = 'AmpOptimWrapper'
+    
+    optim_wrapper = build_optim_wrapper(model, optim_wrapper_cfg)
 
     # put model on gpus
     if distributed:
@@ -99,72 +88,64 @@ def train_segmentor(model,
         model = MMDataParallel(
             model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
-    # MMCV 2.x uses Runner directly, not build_runner
-    # Check if runner config exists, otherwise create default
-    if cfg.get('runner') is None:
-        cfg.runner = {'type': 'IterBasedRunner', 'max_iters': cfg.total_iters}
-        warnings.warn(
-            'config is now expected to have a `runner` section, '
-            'please set `runner` in your config.', UserWarning)
-
-    # For MMCV 2.x, we need to use Runner class directly
-    # Import the appropriate runner type
-    runner_type = cfg.runner.get('type', 'IterBasedRunner')
-    if runner_type == 'IterBasedRunner':
-        from mmengine.runner import IterBasedRunner
-        RunnerClass = IterBasedRunner
-    else:
-        from mmengine.runner import EpochBasedRunner
-        RunnerClass = EpochBasedRunner
+    # MMEngine ≥ 0.7 uses Runner with train_cfg/val_cfg/test_cfg
+    # Convert old runner config to new format
+    max_iters = cfg.total_iters if hasattr(cfg, 'total_iters') else 60000
+    if hasattr(cfg, 'runner') and cfg.runner is not None:
+        # Extract max_iters from old runner config if present
+        if 'max_iters' in cfg.runner:
+            max_iters = cfg.runner['max_iters']
     
-    runner = RunnerClass(
+    # Set up train_cfg for iteration-based training
+    train_cfg = dict(
+        type='IterBasedTrainLoop',
+        max_iters=max_iters,
+        val_interval=cfg.evaluation.get('interval', 1000) if hasattr(cfg, 'evaluation') else 1000
+    )
+    
+    # Set up val_cfg
+    val_cfg = dict(type='ValLoop')
+    
+    # Set up test_cfg
+    test_cfg = dict(type='TestLoop')
+    
+    # Get default_hooks from config, or use None (Runner will use defaults)
+    default_hooks = cfg.get('default_hooks', None)
+    
+    # Create Runner with new API
+    runner = Runner(
         model=model,
         optim_wrapper=optim_wrapper,
         work_dir=cfg.work_dir,
+        train_dataloader=data_loaders[0],
+        val_dataloader=data_loaders[1] if len(data_loaders) > 1 and validate else None,
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        default_hooks=default_hooks,
+        custom_hooks=cfg.get('custom_hooks', None),
+        default_scope=cfg.get('default_scope', 'mmseg'),
+        param_scheduler=cfg.get('param_scheduler', None),
         logger=logger,
-        meta=meta,
-        **{k: v for k, v in cfg.runner.items() if k != 'type'})
+        log_level=cfg.log_level,
+        meta=meta
+    )
 
-    # register hooks - MMCV 2.x uses different hook registration
-    # Note: In MMCV 2.x, hooks are typically registered via default_hooks in config
-    # But for backward compatibility, we'll try to register them manually
-    # The runner should handle default hooks automatically if configured properly
-    # Custom hooks can still be registered here if needed
-    
-    # register throughput hook
+    # Register custom hooks if needed
+    # Note: Most hooks should be configured via default_hooks in config
+    # But we can register custom hooks here if needed
     from .throughput_hook import ThroughputHook
     log_interval = cfg.log_config.get('interval', 50) if cfg.log_config else 50
     runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
 
-    # an ugly walkaround to make the .log and .log.json filenames the same
+    # Set timestamp for log file naming
     runner.timestamp = timestamp
 
-    # register eval hooks - MMCV 2.x uses different eval hooks
-    if validate:
-        val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
-        val_dataloader = build_dataloader(
-            val_dataset,
-            samples_per_gpu=1,
-            workers_per_gpu=cfg.data.workers_per_gpu,
-            dist=distributed,
-            shuffle=False)
-        eval_cfg = cfg.get('evaluation', {})
-        eval_cfg['by_epoch'] = 'IterBasedRunner' not in cfg.runner.get('type', 'IterBasedRunner')
-        # MMCV 2.x uses different eval hooks from mmseg
-        from mmseg.engine import SegEvaluator
-        eval_hook = DistEvalHook if distributed else EvalHook
-        runner.register_hook(eval_hook(val_dataloader, **eval_cfg), priority='LOW')
-
-    # MMCV 2.x uses train_dataloader and val_dataloader instead of workflow
-    # Set dataloaders before resuming/loading
-    runner.train_dataloader = data_loaders[0]
-    if len(data_loaders) > 1:
-        runner.val_dataloader = data_loaders[1]
-    
+    # Handle resume/load checkpoint
     if cfg.resume_from:
         runner.resume(cfg.resume_from)
     elif cfg.load_from:
         runner.load_checkpoint(cfg.load_from)
     
-    # Start training - MMCV 2.x uses runner.train() directly
+    # Start training
     runner.train()

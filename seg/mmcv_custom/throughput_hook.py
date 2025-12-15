@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import time
-from mmcv.runner import HOOKS, Hook
+from mmengine.hooks import Hook
+from mmengine.registry import HOOKS
 
 
 @HOOKS.register_module()
