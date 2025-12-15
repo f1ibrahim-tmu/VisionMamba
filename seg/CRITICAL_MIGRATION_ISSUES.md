@@ -30,82 +30,76 @@
 
 ---
 
-#### 2. samples_per_gpu in Configs (MEDIUM PRIORITY)
+#### 2. samples_per_gpu in Configs (MEDIUM PRIORITY) ✅ FIXED
 
 **Location:** Multiple config files
 
-**Issue:** Configs still use legacy `samples_per_gpu` instead of explicit dataloader configs
+**Issue:** Configs were using legacy `samples_per_gpu` instead of explicit dataloader configs
 
-**Files Affected:**
+**Fix Applied:**
 
-- `seg/configs/_base_/datasets/ade20k.py:53`
-- `seg/configs/_base_/datasets/ade20k_640x640.py:36`
-- `seg/configs/_base_/datasets/ade20k_1024x1024.py:36`
-- `seg/configs/_base_/datasets/ade20k_ms_eval.py:38`
-- All `upernet_vim_*.py` configs
+- Added explicit `train_dataloader` configs to all config files
+- Updated `train_api.py` to support both MMEngine format (explicit dataloaders) and legacy format
+- Maintained backward compatibility with `samples_per_gpu` for legacy code
 
-**Current State:**
+**Files Updated:**
 
-```python
-data = dict(
-    samples_per_gpu=8,
-    workers_per_gpu=16,
-    train=dict(...),
-    val=dict(...)
-)
-```
+- `seg/configs/_base_/datasets/ade20k.py` - Added train_dataloader/val_dataloader/test_dataloader
+- All `upernet_vim_*.py` configs - Added train_dataloader configs
+- `seg/mmcv_custom/train_api.py` - Updated to handle both formats
 
-**MMEngine Format (Recommended):**
+**New Format:**
 
 ```python
 train_dataloader = dict(
     batch_size=8,
     num_workers=16,
     persistent_workers=True,
-    sampler=dict(type='InfiniteSampler', shuffle=True),
-    dataset=dict(...)
+    sampler=dict(type='InfiniteSampler', shuffle=True)
 )
 
-val_dataloader = dict(
-    batch_size=1,
-    num_workers=4,
-    persistent_workers=True,
-    sampler=dict(type='DefaultSampler', shuffle=False),
-    dataset=dict(...)
-)
+# Backward compatibility: keep old format
+data=dict(samples_per_gpu=8, workers_per_gpu=16)
 ```
 
-**Impact:**
-
-- Current implementation works because `train_api.py` manually builds dataloaders from `samples_per_gpu`
-- However, this is not the "proper" MMEngine way
-- May cause issues with distributed training if not handled correctly
-
-**Status:** ⚠️ PARTIALLY WORKING - Backward compatibility maintained, but not ideal
+**Status:** ✅ FIXED - Now uses explicit dataloader configs with backward compatibility
 
 ---
 
-#### 3. fp16 Handling in test.py (LOW PRIORITY)
+#### 3. fp16 Handling in test.py (LOW PRIORITY) ✅ FIXED
 
-**Location:** `seg/test.py:228-230`
+**Location:** `seg/test.py:229-245`
 
-**Issue:** Uses `cfg.get('fp16', None)` and `wrap_fp16_model()`
+**Issue:** Was using deprecated `cfg.get('fp16', None)` and `wrap_fp16_model()`
 
-**Current Code:**
+**Fix Applied:**
+
+- Updated to check `optim_wrapper` config first (preferred method)
+- Falls back to deprecated `fp16` config for backward compatibility
+- Added warning when using deprecated `fp16` config
+- For inference, `wrap_fp16_model()` is still acceptable
+
+**New Code:**
 
 ```python
-fp16_cfg = cfg.get('fp16', None)
-if fp16_cfg is not None:
+# Check optim_wrapper config first (preferred)
+use_fp16 = False
+if hasattr(cfg, 'optim_wrapper') and cfg.optim_wrapper is not None:
+    if isinstance(cfg.optim_wrapper, dict):
+        use_fp16 = cfg.optim_wrapper.get('type') == 'AmpOptimWrapper'
+
+# Fallback to deprecated fp16 config (with warning)
+if not use_fp16:
+    fp16_cfg = cfg.get('fp16', None)
+    if fp16_cfg is not None:
+        warnings.warn('Using deprecated `fp16` config...')
+        use_fp16 = True
+
+if use_fp16:
     wrap_fp16_model(model)
 ```
 
-**Impact:**
-
-- `fp16` config key is deprecated
-- Should use `AmpOptimWrapper` instead
-- However, for inference, `wrap_fp16_model()` might still be acceptable
-
-**Status:** ⚠️ ACCEPTABLE - Works but uses deprecated API
+**Status:** ✅ FIXED - Now prefers optim_wrapper config, with backward compatibility
 
 ---
 

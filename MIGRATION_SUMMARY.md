@@ -90,11 +90,27 @@ If you have custom scripts that directly import MMCV, you may need to update the
 - `mmcv.utils.Config` → `mmengine.config.Config`
 - `mmcv.utils.DictAction` → `mmengine.argparse.DictAction`
 - `mmcv.fileio` → `mmengine.fileio`
+- **REMOVED**: `IterBasedRunner`, `EpochBasedRunner` (use `Runner` with `train_cfg`)
+- **REMOVED**: `mmseg.apis.multi_gpu_test`, `single_gpu_test` (use `Runner.test()`)
 
 ### API Changes
-- Runner API: Uses `Runner` class directly instead of `build_runner()`
-- Optimizer: Uses `optim_wrapper` instead of direct `optimizer`
-- Workflow: Replaced with `train_dataloader` and `val_dataloader`
+- **Runner API**: Uses `Runner` class with `train_cfg`/`val_cfg`/`test_cfg` instead of `IterBasedRunner`/`EpochBasedRunner`
+- **Training Loops**: `IterBasedRunner` → `IterBasedTrainLoop` in `train_cfg`
+- **Optimizer**: Uses `optim_wrapper` instead of `optimizer` + `optimizer_config`
+- **Dataloaders**: `samples_per_gpu` → explicit `train_dataloader`/`val_dataloader` configs
+- **Learning Rate**: `lr_config` → `param_scheduler` (list format)
+- **Hooks**: `log_config`/`checkpoint_config` → `default_hooks` dict
+- **AMP**: Apex AMP → `AmpOptimWrapper` in `optim_wrapper`
+- **Testing**: `multi_gpu_test`/`single_gpu_test` → `Runner.test()`
+
+### Config Format Changes
+- `runner` → `train_cfg`/`val_cfg`/`test_cfg`
+- `samples_per_gpu` → `train_dataloader.batch_size`
+- `optimizer_config` → `optim_wrapper`
+- `lr_config` → `param_scheduler`
+- `log_config`/`checkpoint_config` → `default_hooks`
+- `workflow` → **REMOVED** (use dataloaders directly)
+- `fp16` → `AmpOptimWrapper` in `optim_wrapper`
 
 ## Potential Issues
 
@@ -105,12 +121,25 @@ Your existing config files should mostly work, but you may need to:
 - Update hook configurations
 
 ### 2. Custom Hooks
-If you have custom hooks, they may need updates to work with MMEngine's hook system.
+If you have custom hooks, they must:
+- Inherit from `mmengine.hooks.Hook` (not `mmcv.runner.Hook`)
+- Be registered with `@HOOKS.register_module()` from `mmengine.registry`
+- Use MMEngine hook lifecycle methods
 
 ### 3. MMSegmentation/MMDetection Versions
 Ensure your `mmsegmentation` and `mmdetection` versions are compatible with MMCV 2.x:
-- MMSegmentation 0.30.0+ supports MMCV 2.x
-- MMDetection 3.0.0+ supports MMCV 2.x
+- **MMSegmentation ≥ 1.0.0** supports MMCV 2.x and MMEngine ≥ 0.7
+- **MMDetection ≥ 3.0.0** supports MMCV 2.x and MMEngine ≥ 0.7
+
+### 4. Config File Updates Required
+All config files should be updated to use:
+- `train_cfg`/`val_cfg`/`test_cfg` instead of `runner`
+- `train_dataloader`/`val_dataloader` instead of `samples_per_gpu`
+- `optim_wrapper` instead of `optimizer_config`
+- `param_scheduler` instead of `lr_config`
+- `default_hooks` instead of `log_config`/`checkpoint_config`
+
+See `seg/MMENGINE_CONFIG_GUIDE.md` for complete examples.
 
 ## Documentation
 

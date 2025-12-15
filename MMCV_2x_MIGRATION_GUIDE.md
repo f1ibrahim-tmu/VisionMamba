@@ -50,8 +50,8 @@ EOF
 
 ### Import Changes
 
-| MMCV 1.x | MMCV 2.x |
-|----------|----------|
+| MMCV 1.x | MMCV 2.x / MMEngine ≥ 0.7 |
+|----------|---------------------------|
 | `from mmcv.runner import ...` | `from mmengine.runner import ...` |
 | `from mmcv.parallel import ...` | `from mmengine.model import ...` |
 | `from mmcv.utils import Config` | `from mmengine.config import Config` |
@@ -66,7 +66,10 @@ EOF
 | `from mmcv.parallel import MMDistributedDataParallel` | `from mmengine.model import MMDistributedDataParallel` |
 | `from mmcv.parallel import is_module_wrapper` | `from mmengine.model import is_model_wrapper` |
 | `from mmcv.runner import build_optimizer` | `from mmengine.optim import build_optim_wrapper` |
-| `from mmcv.runner import build_runner` | Use `Runner` class directly |
+| `from mmcv.runner import IterBasedRunner` | **REMOVED** - Use `Runner` with `train_cfg` |
+| `from mmcv.runner import EpochBasedRunner` | **REMOVED** - Use `Runner` with `train_cfg` |
+| `from mmseg.apis import multi_gpu_test` | **REMOVED** - Use `Runner.test()` |
+| `from mmseg.apis import single_gpu_test` | **REMOVED** - Use `Runner.test()` |
 | `mmcv.Config.fromfile()` | `mmengine.Config.fromfile()` |
 | `mmcv.mkdir_or_exist()` | `mmengine.utils.mkdir_or_exist()` |
 | `mmcv.dump()` | `mmengine.fileio.dump()` |
@@ -74,12 +77,29 @@ EOF
 | `mmcv.imrescale()` | `from mmcv.image import imrescale` |
 | `mmcv.imresize()` | `from mmcv.image import imresize` |
 
+### Config Format Changes
+
+| Old Format (MMCV 1.x) | New Format (MMEngine ≥ 0.7) |
+|----------------------|----------------------------|
+| `runner = dict(type='IterBasedRunner', max_iters=60000)` | `train_cfg = dict(type='IterBasedTrainLoop', max_iters=60000, val_interval=1000)` |
+| `data = dict(samples_per_gpu=8, workers_per_gpu=16)` | `train_dataloader = dict(batch_size=8, num_workers=16, sampler=dict(type='InfiniteSampler'))` |
+| `optimizer_config = dict(type="DistOptimizerHook", use_fp16=False)` | `optim_wrapper = dict(type='OptimWrapper', optimizer=optimizer)` |
+| `lr_config = dict(policy='poly', power=0.9, min_lr=1e-4)` | `param_scheduler = [dict(type='PolyLR', eta_min=1e-4, power=0.9, begin=0, end=60000)]` |
+| `log_config = dict(interval=50, hooks=[...])` | `default_hooks = dict(logger=dict(type='LoggerHook', interval=50))` |
+| `checkpoint_config = dict(interval=1000, max_keep_ckpts=4)` | `default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=1000, max_keep_ckpts=4))` |
+| `workflow = [('train', 1)]` | **REMOVED** - Use `train_dataloader`/`val_dataloader` |
+| `fp16 = dict(...)` | `optim_wrapper = dict(type='AmpOptimWrapper', optimizer=optimizer)` |
+
 ### Key API Changes
 
-1. **Runner API**: MMCV 2.x uses `Runner` class directly instead of `build_runner()`
-2. **Optimizer**: Uses `optim_wrapper` instead of direct `optimizer`
-3. **Hooks**: Hook registration and configuration changed
-4. **Workflow**: Replaced with `train_dataloader` and `val_dataloader`
+1. **Runner API**: MMEngine ≥ 0.7 uses `Runner` with `train_cfg`/`val_cfg`/`test_cfg` instead of `IterBasedRunner`/`EpochBasedRunner`
+2. **Training Loops**: `IterBasedRunner` → `IterBasedTrainLoop` in `train_cfg`
+3. **Optimizer**: Uses `optim_wrapper` instead of direct `optimizer` + `optimizer_config`
+4. **Dataloaders**: `samples_per_gpu` → explicit `train_dataloader`/`val_dataloader` configs
+5. **Learning Rate**: `lr_config` → `param_scheduler` (list format)
+6. **Hooks**: `log_config`/`checkpoint_config` → `default_hooks` dict
+7. **AMP**: Apex AMP → `AmpOptimWrapper` in `optim_wrapper`
+8. **Testing**: `mmseg.apis.multi_gpu_test` → `Runner.test()`
 
 ## Files Updated
 
@@ -163,17 +183,65 @@ python test.py configs/your_config.py checkpoint.pth --eval mIoU
 
 **Solution**: Import from `mmengine.runner` instead of `mmcv.runner`.
 
+### Issue: `ImportError: cannot import name 'IterBasedRunner' from 'mmengine.runner'`
+
+**Solution**: `IterBasedRunner` no longer exists in MMEngine ≥ 0.7. Use `Runner` with `train_cfg=dict(type='IterBasedTrainLoop', ...)` instead.
+
+### Issue: `ImportError: cannot import name 'multi_gpu_test' from 'mmseg.apis'`
+
+**Solution**: These functions are removed in MMSegmentation 1.x. Use `Runner.test()` instead. See updated `test.py` for example.
+
 ### Issue: Runner API errors
 
-**Solution**: MMCV 2.x uses a different runner API. The runner is initialized directly with the model, optim_wrapper, and other parameters. Check the updated `train_api.py` for the new pattern.
+**Solution**: MMEngine ≥ 0.7 uses a different runner API. The runner is initialized with:
+- `train_cfg`/`val_cfg`/`test_cfg` instead of `runner` config
+- `train_dataloader`/`val_dataloader` instead of building manually
+- `optim_wrapper` instead of `optimizer` + `optimizer_config`
+
+Check the updated `train_api.py` for the new pattern.
+
+### Issue: Dataloader configuration errors
+
+**Solution**: Use explicit `train_dataloader`/`val_dataloader` configs instead of `samples_per_gpu`. See `MMENGINE_CONFIG_GUIDE.md` for examples.
+
+### Issue: Optimizer configuration errors
+
+**Solution**: Use `optim_wrapper` instead of `optimizer_config`. For FP16, use `AmpOptimWrapper` in `optim_wrapper`, not apex.
+
+### Issue: Learning rate scheduler errors
+
+**Solution**: Convert `lr_config` to `param_scheduler` list format. See `MMENGINE_CONFIG_GUIDE.md` for examples.
 
 ## Additional Notes
 
-1. **MMEngine Dependency**: MMCV 2.x requires MMEngine as a separate package. Make sure it's installed.
+1. **MMEngine Dependency**: MMCV 2.x requires MMEngine ≥ 0.7 as a separate package. Make sure it's installed.
 
-2. **Backward Compatibility**: Some functions have been aliased for backward compatibility (e.g., `is_module_wrapper` → `is_model_wrapper`), but it's recommended to update to the new names.
+2. **Backward Compatibility**: Limited backward compatibility is maintained for:
+   - `samples_per_gpu` (automatically converted, but deprecated)
+   - Legacy `runner` configs (automatically converted, but deprecated)
+   - Old `optimizer_config` (automatically converted, but deprecated)
+   
+   However, **new configs should use the MMEngine format** for full compatibility.
 
-3. **Config Files**: Your existing config files should mostly work, but you may need to update some sections to match the new API expectations.
+3. **Config Files**: Your existing config files will need updates:
+   - Replace `runner` with `train_cfg`/`val_cfg`/`test_cfg`
+   - Convert `samples_per_gpu` to explicit `train_dataloader` configs
+   - Replace `optimizer_config` with `optim_wrapper`
+   - Convert `lr_config` to `param_scheduler`
+   - Update hooks to `default_hooks` format
+
+4. **Apex Removal**: Apex AMP is no longer supported. Use `AmpOptimWrapper` in `optim_wrapper` for FP16 training.
+
+5. **Testing API**: `mmseg.apis.multi_gpu_test` and `single_gpu_test` are removed. Use `Runner.test()` instead.
+
+## Documentation
+
+For complete configuration examples and migration details, see:
+- `seg/MMENGINE_CONFIG_GUIDE.md` - Complete MMEngine config format guide
+- `seg/DEPRECATION_NOTES.md` - All deprecated APIs and replacements
+- `seg/CRITICAL_MIGRATION_ISSUES.md` - Known issues and fixes
+- [MMEngine Documentation](https://mmengine.readthedocs.io/)
+- [MMSegmentation Migration Guide](https://mmsegmentation.readthedocs.io/en/latest/migration/)
 
 4. **Custom Hooks**: If you have custom hooks, they may need to be updated to work with MMEngine's hook system.
 
