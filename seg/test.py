@@ -20,10 +20,11 @@ try:
 except ImportError:
     # Fallback for older versions
     from mmseg import digit_version
-from mmseg.apis import multi_gpu_test, single_gpu_test
 from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.models import build_segmentor
 from mmseg.utils import build_ddp, build_dp, get_device, setup_multi_processes
+from mmengine.runner import Runner
+from mmengine.model import MMDataParallel, MMDistributedDataParallel
 
 from backbone import vim
 
@@ -196,8 +197,7 @@ def main():
             json_file = osp.join(work_dir,
                                  f'eval_single_scale_{timestamp}.json')
 
-    # build the dataloader
-    # TODO: support multiple images per gpu (only minor changes are needed)
+    # build the dataset and dataloader
     dataset = build_dataset(cfg.data.test)
     # The default loader config
     loader_cfg = dict(
@@ -220,14 +220,18 @@ def main():
         **cfg.data.get('test_dataloader', {})
     }
     # build the dataloader
-    data_loader = build_dataloader(dataset, **test_loader_cfg)
+    test_dataloader = build_dataloader(dataset, **test_loader_cfg)
 
     # build the model and load checkpoint
     cfg.model.train_cfg = None
     model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
+    
+    # Handle fp16 - use wrap_fp16_model for inference (deprecated but still works)
+    # Note: For training, use AmpOptimWrapper instead
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
         wrap_fp16_model(model)
+    
     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
     if 'CLASSES' in checkpoint.get('meta', {}):
         model.CLASSES = checkpoint['meta']['CLASSES']
@@ -268,6 +272,33 @@ def main():
     else:
         tmpdir = None
 
+    # Prepare evaluator configuration
+    # MMEngine uses evaluator instead of direct evaluation
+    test_evaluator = None
+    if args.eval is not None or args.format_only:
+        # Build evaluator from mmseg
+        try:
+            from mmseg.engine import SegEvaluator
+            evaluator_cfg = dict(
+                type='IoUMetric' if args.eval else 'SegEvaluator',
+                format_only=args.format_only or eval_on_format_results
+            )
+            if args.eval:
+                evaluator_cfg['metric'] = args.eval
+            evaluator_cfg.update(eval_kwargs)
+            test_evaluator = SegEvaluator(**evaluator_cfg) if hasattr(SegEvaluator, '__call__') else evaluator_cfg
+        except (ImportError, TypeError):
+            # Fallback: use dict config for evaluator
+            evaluator_cfg = dict(
+                type='IoUMetric' if args.eval else 'SegEvaluator',
+                format_only=args.format_only or eval_on_format_results
+            )
+            if args.eval:
+                evaluator_cfg['metric'] = args.eval
+            evaluator_cfg.update(eval_kwargs)
+            test_evaluator = evaluator_cfg
+
+    # Set up device and model wrapping
     cfg.device = get_device()
     if not distributed:
         warnings.warn(
@@ -280,51 +311,85 @@ def main():
             assert digit_version(mmengine.__version__) >= digit_version('0.10.0'), \
                 'Please use MMEngine >= 0.10.0 for CPU training!'
         model = revert_sync_batchnorm(model)
-        model = build_dp(model, cfg.device, device_ids=cfg.gpu_ids)
-        results = single_gpu_test(
-            model,
-            data_loader,
-            args.show,
-            args.show_dir,
-            False,
-            args.opacity,
-            pre_eval=args.eval is not None and not eval_on_format_results,
-            format_only=args.format_only or eval_on_format_results,
-            format_args=eval_kwargs)
+        model = MMDataParallel(model, device_ids=cfg.gpu_ids)
     else:
-        model = build_ddp(
+        model = MMDistributedDataParallel(
             model,
-            cfg.device,
             device_ids=[int(os.environ['LOCAL_RANK'])],
             broadcast_buffers=False)
-        results = multi_gpu_test(
-            model,
-            data_loader,
-            args.tmpdir,
-            args.gpu_collect,
-            False,
-            pre_eval=args.eval is not None and not eval_on_format_results,
-            format_only=args.format_only or eval_on_format_results,
-            format_args=eval_kwargs)
 
+    # Create Runner for testing
+    # Note: For custom show/format functionality, we may need to use custom hooks
+    # For now, we'll use Runner.test() and handle show/format separately if needed
+    test_cfg = dict(type='TestLoop')
+    
+    # Set up work_dir
+    if args.work_dir is not None:
+        work_dir = args.work_dir
+    else:
+        work_dir = osp.join('./work_dirs',
+                            osp.splitext(osp.basename(args.config))[0])
+    
+    runner = Runner(
+        model=model,
+        work_dir=work_dir,
+        test_dataloader=test_dataloader,
+        test_evaluator=test_evaluator,
+        test_cfg=test_cfg,
+        default_scope='mmseg'
+    )
+
+    # Register custom hooks for show/format/out functionality if needed
+    custom_hooks = []
+    if args.show or args.show_dir:
+        # Note: Show functionality typically requires custom visualization hooks
+        # This is a placeholder - full implementation would need a custom hook
+        warnings.warn(
+            'Show functionality with Runner.test() requires custom hooks. '
+            'Consider using mmseg visualization hooks.')
+    
+    if custom_hooks:
+        runner.register_hook(custom_hooks[0])
+    
+    # Run testing
+    # Runner.test() handles distributed testing automatically
+    runner.test()
+
+    # Handle post-test outputs
     rank, _ = get_dist_info()
     if rank == 0:
+        # Get results from runner's message hub or evaluator
+        # The evaluator should have stored results during test()
+        results = None
+        if hasattr(runner, 'message_hub'):
+            # Try to get results from message hub
+            if 'test' in runner.message_hub.log_scalars:
+                results = runner.message_hub.log_scalars.get('test', {})
+        
+        # Save results to file if requested
         if args.out:
-            warnings.warn(
-                'The behavior of ``args.out`` has been changed since MMSeg '
-                'v0.16, the pickled outputs could be seg map as type of '
-                'np.array, pre-eval results or file paths for '
-                '``dataset.format_results()``.')
-            print(f'\nwriting results to {args.out}')
-            mmengine.fileio.dump(results, args.out)
-        if args.eval:
-            eval_kwargs.update(metric=args.eval)
-            metric = dataset.evaluate(results, **eval_kwargs)
-            metric_dict = dict(config=args.config, metric=metric)
-            mmengine.fileio.dump(metric_dict, json_file, indent=4)
-            if tmpdir is not None and eval_on_format_results:
-                # remove tmp dir when cityscapes evaluation
-                shutil.rmtree(tmpdir)
+            if results is None:
+                warnings.warn(
+                    'Results not available from Runner. '
+                    'The --out option may not work as expected with Runner.test(). '
+                    'Consider using evaluator outputs or custom hooks.')
+            else:
+                print(f'\nwriting results to {args.out}')
+                mmengine.fileio.dump(results, args.out)
+        
+        # Save evaluation metrics if evaluation was performed
+        if args.eval and test_evaluator is not None:
+            # Evaluation results should be in runner's message hub
+            # or printed by the evaluator
+            if hasattr(runner, 'message_hub'):
+                eval_results = runner.message_hub.log_scalars.get('test', {})
+                if eval_results:
+                    metric_dict = dict(config=args.config, metric=eval_results)
+                    mmengine.fileio.dump(metric_dict, json_file, indent=4)
+        
+        # Clean up tmpdir if created
+        if tmpdir is not None and eval_on_format_results:
+            shutil.rmtree(tmpdir)
 
 
 if __name__ == '__main__':

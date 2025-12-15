@@ -143,7 +143,8 @@ def main():
     logger.info(model)
 
     datasets = [build_dataset(cfg.data.train)]
-    if len(cfg.workflow) == 2:
+    # Check if validation should be included (validate flag or explicit val_dataloader)
+    if validate and hasattr(cfg.data, 'val'):
         val_dataset = copy.deepcopy(cfg.data.val)
         val_dataset.pipeline = cfg.data.train.pipeline
         datasets.append(build_dataset(val_dataset))
