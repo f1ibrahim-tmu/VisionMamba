@@ -72,4 +72,22 @@ param_scheduler = [
 ]
 
 # By default, models are trained on 4 GPUs with 8 images per GPU
+# MMEngine format: explicit dataloader configs (overrides base config)
+train_dataloader = dict(
+    batch_size=8,
+    num_workers=16,
+    persistent_workers=True,
+    sampler=dict(type='InfiniteSampler', shuffle=True)
+)
+
+# Backward compatibility: keep old format
+# MMEngine format: explicit dataloader configs (overrides base config)
+train_dataloader = dict(
+    batch_size=8,
+    num_workers=16,
+    persistent_workers=True,
+    sampler=dict(type='InfiniteSampler', shuffle=True)
+)
+
+# Backward compatibility: keep old format
 data=dict(samples_per_gpu=8, workers_per_gpu=16)

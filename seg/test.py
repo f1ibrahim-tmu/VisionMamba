@@ -226,10 +226,25 @@ def main():
     cfg.model.train_cfg = None
     model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
     
-    # Handle fp16 - use wrap_fp16_model for inference (deprecated but still works)
-    # Note: For training, use AmpOptimWrapper instead
-    fp16_cfg = cfg.get('fp16', None)
-    if fp16_cfg is not None:
+    # Handle fp16 - check optim_wrapper config instead of deprecated fp16 key
+    # For inference, wrap_fp16_model is still acceptable, but prefer optim_wrapper config
+    use_fp16 = False
+    if hasattr(cfg, 'optim_wrapper') and cfg.optim_wrapper is not None:
+        if isinstance(cfg.optim_wrapper, dict):
+            use_fp16 = cfg.optim_wrapper.get('type') == 'AmpOptimWrapper'
+        else:
+            use_fp16 = getattr(cfg.optim_wrapper, 'type', None) == 'AmpOptimWrapper'
+    
+    # Fallback to deprecated fp16 config for backward compatibility
+    if not use_fp16:
+        fp16_cfg = cfg.get('fp16', None)
+        if fp16_cfg is not None:
+            warnings.warn(
+                'Using deprecated `fp16` config. For training, use `optim_wrapper` '
+                'with `type="AmpOptimWrapper"` instead.')
+            use_fp16 = True
+    
+    if use_fp16:
         wrap_fp16_model(model)
     
     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')

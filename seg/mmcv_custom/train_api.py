@@ -44,19 +44,78 @@ def train_segmentor(model,
     """Launch segmentor training."""
     logger = get_root_logger(cfg.log_level)
 
-    # prepare data loaders
-    dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
-    data_loaders = [
-        build_dataloader(
-            ds,
-            cfg.data.samples_per_gpu,
-            cfg.data.workers_per_gpu,
-            # cfg.gpus will be ignored if distributed
+    # Prepare data loaders - support both MMEngine format and legacy format
+    train_dataloader = None
+    val_dataloader = None
+    
+    # Check if explicit dataloader configs exist (MMEngine format)
+    if hasattr(cfg, 'train_dataloader') and cfg.train_dataloader is not None:
+        # Use explicit dataloader config - Runner will build it automatically
+        # But we need to ensure dataset is included if not in config
+        train_dataloader_cfg = cfg.train_dataloader.copy()
+        
+        # If dataset is not in config, use the dataset passed as argument
+        if 'dataset' not in train_dataloader_cfg:
+            train_dataset = dataset[0] if isinstance(dataset, (list, tuple)) else dataset
+            # Build dataset if it's a dict, otherwise use directly
+            if isinstance(train_dataset, dict):
+                train_dataloader_cfg['dataset'] = build_dataset(train_dataset)
+            else:
+                train_dataloader_cfg['dataset'] = train_dataset
+        elif isinstance(train_dataloader_cfg['dataset'], dict):
+            # Build dataset from dict config
+            train_dataloader_cfg['dataset'] = build_dataset(train_dataloader_cfg['dataset'])
+        
+        # Runner can build from config, but we can also build it here for compatibility
+        # Build dataloader manually to ensure compatibility with mmseg's build_dataloader
+        train_dataloader = build_dataloader(
+            train_dataloader_cfg['dataset'],
+            train_dataloader_cfg.get('batch_size', 4),
+            train_dataloader_cfg.get('num_workers', 4),
             len(cfg.gpu_ids),
             dist=distributed,
             seed=cfg.seed,
-            drop_last=True) for ds in dataset
-    ]
+            drop_last=train_dataloader_cfg.get('drop_last', True)
+        )
+        
+        if validate and hasattr(cfg, 'val_dataloader') and cfg.val_dataloader is not None:
+            val_dataloader_cfg = cfg.val_dataloader.copy()
+            if 'dataset' not in val_dataloader_cfg:
+                val_dataset = dataset[1] if (isinstance(dataset, (list, tuple)) and len(dataset) > 1) else None
+                if val_dataset is not None:
+                    if isinstance(val_dataset, dict):
+                        val_dataloader_cfg['dataset'] = build_dataset(val_dataset)
+                    else:
+                        val_dataloader_cfg['dataset'] = val_dataset
+            elif isinstance(val_dataloader_cfg['dataset'], dict):
+                val_dataloader_cfg['dataset'] = build_dataset(val_dataloader_cfg['dataset'])
+            
+            if 'dataset' in val_dataloader_cfg:
+                val_dataloader = build_dataloader(
+                    val_dataloader_cfg['dataset'],
+                    val_dataloader_cfg.get('batch_size', 1),
+                    val_dataloader_cfg.get('num_workers', 4),
+                    len(cfg.gpu_ids),
+                    dist=distributed,
+                    seed=cfg.seed,
+                    drop_last=False
+                )
+    else:
+        # Legacy format: build from dataset objects and samples_per_gpu
+        dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
+        data_loaders = [
+            build_dataloader(
+                ds,
+                cfg.data.samples_per_gpu if hasattr(cfg.data, 'samples_per_gpu') else 4,
+                cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                # cfg.gpus will be ignored if distributed
+                len(cfg.gpu_ids),
+                dist=distributed,
+                seed=cfg.seed,
+                drop_last=True) for ds in dataset
+        ]
+        train_dataloader = data_loaders[0]
+        val_dataloader = data_loaders[1] if len(data_loaders) > 1 and validate else None
 
     # build optimizer - MMEngine uses optim_wrapper
     if hasattr(cfg, 'optim_wrapper'):
@@ -117,8 +176,8 @@ def train_segmentor(model,
         model=model,
         optim_wrapper=optim_wrapper,
         work_dir=cfg.work_dir,
-        train_dataloader=data_loaders[0],
-        val_dataloader=data_loaders[1] if len(data_loaders) > 1 and validate else None,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader if validate else None,
         train_cfg=train_cfg,
         val_cfg=val_cfg,
         test_cfg=test_cfg,

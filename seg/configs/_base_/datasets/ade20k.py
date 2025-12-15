@@ -49,6 +49,47 @@ test_pipeline = [
 #     dict(type='Collect', keys=['img']),
 # ]
 
+# MMEngine format: explicit dataloader configs
+train_dataloader = dict(
+    batch_size=4,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='InfiniteSampler', shuffle=True),
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_total,
+        img_dir='images/training',
+        ann_dir='annotations/training',
+        pipeline=train_pipeline)
+)
+
+val_dataloader = dict(
+    batch_size=1,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='DefaultSampler', shuffle=False),
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_total,
+        img_dir='images/validation',
+        ann_dir='annotations/validation',
+        pipeline=test_pipeline)
+)
+
+test_dataloader = dict(
+    batch_size=1,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='DefaultSampler', shuffle=False),
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_total,
+        img_dir='images/validation',
+        ann_dir='annotations/validation',
+        pipeline=test_pipeline)
+)
+
+# Backward compatibility: keep old format for legacy code
 data = dict(
     samples_per_gpu=4,
     workers_per_gpu=4,
@@ -70,10 +111,4 @@ data = dict(
         img_dir='images/validation',
         ann_dir='annotations/validation',
         pipeline=test_pipeline),
-    # benchmark=dict(
-    #     type=dataset_type,
-    #     data_root=data_total,
-    #     img_dir='images/training',
-    #     ann_dir='annotations/training',
-    #     pipeline=benchmark_pipeline)        
 )
