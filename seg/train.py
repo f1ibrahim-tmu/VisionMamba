@@ -8,8 +8,7 @@ import mmcv
 import mmengine
 import torch
 from mmengine.dist import init_dist
-from mmengine.config import Config
-from mmengine.argparse import DictAction
+from mmengine.config import Config, DictAction
 from mmengine.utils import get_git_hash
 
 from mmseg import __version__

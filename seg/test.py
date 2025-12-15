@@ -12,7 +12,7 @@ import torch
 from mmcv.cnn.utils import revert_sync_batchnorm
 from mmengine.dist import get_dist_info, init_dist
 from mmengine.runner import load_checkpoint, wrap_fp16_model
-from mmengine.argparse import DictAction
+from mmengine.config import DictAction
 
 # MMSegmentation 1.0.0+ moved digit_version to mmengine
 try:
