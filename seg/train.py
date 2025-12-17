@@ -18,13 +18,6 @@ except ImportError:
     # Fallback for older versions or if not available
     from mmcv_custom.train_api import set_random_seed
 from mmcv_custom import train_segmentor
-# MMSegmentation ≥ 1.2: build_dataset moved to mmengine.dataset
-try:
-    # MMSeg >= 1.2
-    from mmengine.dataset import build_dataset
-except ImportError:
-    # Older MMSeg
-    from mmseg.datasets import build_dataset
 from mmseg.models import build_segmentor
 from mmengine.logging import MMLogger
 # collect_env moved to mmengine.utils in MMSeg 1.x
@@ -157,28 +150,76 @@ def main():
 
     logger.info(model)
 
-    datasets = [build_dataset(cfg.data.train)]
-    # Check if validation should be included (validate flag or explicit val_dataloader)
-    if validate and hasattr(cfg.data, 'val'):
-        val_dataset = copy.deepcopy(cfg.data.val)
-        val_dataset.pipeline = cfg.data.train.pipeline
-        datasets.append(build_dataset(val_dataset))
+    # MMSeg 1.x: Pass dataset config dicts instead of building datasets
+    # Runner will handle dataset/dataloader building from configs
+    datasets = []
+    # Convert to dict if it's a ConfigDict
+    if hasattr(cfg.data.train, 'to_dict'):
+        train_dataset_cfg = cfg.data.train.to_dict()
+    elif hasattr(cfg.data.train, 'copy'):
+        train_dataset_cfg = cfg.data.train.copy()
+    else:
+        train_dataset_cfg = cfg.data.train
+    datasets.append(train_dataset_cfg)
+    
+    # Check if validation should be included
+    validate_flag = not args.no_validate
+    if validate_flag and hasattr(cfg.data, 'val'):
+        # Convert to dict if it's a ConfigDict
+        if hasattr(cfg.data.val, 'to_dict'):
+            val_dataset_cfg = cfg.data.val.to_dict()
+        else:
+            val_dataset_cfg = copy.deepcopy(cfg.data.val)
+        
+        # Ensure validation uses training pipeline
+        if isinstance(train_dataset_cfg, dict) and 'pipeline' in train_dataset_cfg:
+            val_dataset_cfg['pipeline'] = train_dataset_cfg['pipeline']
+        elif hasattr(cfg.data.train, 'pipeline'):
+            if isinstance(val_dataset_cfg, dict):
+                val_dataset_cfg['pipeline'] = cfg.data.train.pipeline
+            else:
+                val_dataset_cfg.pipeline = cfg.data.train.pipeline
+        datasets.append(val_dataset_cfg)
+    
+    # Get CLASSES and PALETTE from dataset config for checkpoint metadata
+    # Try to get from dataset config, fallback to model if available
     if cfg.checkpoint_config is not None:
-        # save mmseg version, config file content and class names in
-        # checkpoints as meta data
-        cfg.checkpoint_config.meta = dict(
-            mmseg_version=f'{__version__}+{get_git_hash()[:7]}',
-            config=cfg.pretty_text,
-            CLASSES=datasets[0].CLASSES,
-            PALETTE=datasets[0].PALETTE)
-    # add an attribute for visualization convenience
-    model.CLASSES = datasets[0].CLASSES
+        classes = None
+        palette = None
+        # Try to get from dataset config
+        if isinstance(train_dataset_cfg, dict):
+            classes = train_dataset_cfg.get('CLASSES', None)
+            palette = train_dataset_cfg.get('PALETTE', None)
+        elif hasattr(train_dataset_cfg, 'CLASSES'):
+            classes = train_dataset_cfg.CLASSES
+            palette = getattr(train_dataset_cfg, 'PALETTE', None)
+        
+        # Fallback to model if available
+        if classes is None and hasattr(model, 'CLASSES'):
+            classes = model.CLASSES
+        if palette is None and hasattr(model, 'PALETTE'):
+            palette = model.PALETTE
+        
+        if classes is not None:
+            cfg.checkpoint_config.meta = dict(
+                mmseg_version=f'{__version__}+{get_git_hash()[:7]}',
+                config=cfg.pretty_text,
+                CLASSES=classes,
+                PALETTE=palette if palette is not None else None
+            )
+    
+    # Set model.CLASSES if available from config
+    if isinstance(train_dataset_cfg, dict) and 'CLASSES' in train_dataset_cfg:
+        model.CLASSES = train_dataset_cfg['CLASSES']
+    elif hasattr(train_dataset_cfg, 'CLASSES'):
+        model.CLASSES = train_dataset_cfg.CLASSES
+    
     train_segmentor(
         model,
         datasets,
         cfg,
         distributed=distributed,
-        validate=(not args.no_validate),
+        validate=validate_flag,
         timestamp=timestamp,
         meta=meta)
 
