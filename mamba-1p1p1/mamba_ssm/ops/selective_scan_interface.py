@@ -2,7 +2,21 @@
 
 import torch
 import torch.nn.functional as F
-from torch.amp import custom_bwd, custom_fwd
+
+# Handle PyTorch version compatibility for custom_fwd/custom_bwd
+# torch.amp was introduced in PyTorch 2.4, older versions use torch.cuda.amp
+if hasattr(torch, 'amp'):
+    from torch.amp import custom_bwd, custom_fwd
+    def _custom_fwd(func):
+        return custom_fwd(device_type='cuda')(func)
+    def _custom_bwd(func):
+        return custom_bwd(device_type='cuda')(func)
+else:
+    from torch.cuda.amp import custom_bwd, custom_fwd
+    def _custom_fwd(func):
+        return custom_fwd(func)
+    def _custom_bwd(func):
+        return custom_bwd(func)
 
 from einops import rearrange, repeat
 
@@ -366,7 +380,7 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
 class MambaInnerFnNoOutProj(torch.autograd.Function):
 
     @staticmethod
-    @custom_fwd(device_type='cuda')
+    @_custom_fwd
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
                 C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
@@ -435,7 +449,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
         return out_z
 
     @staticmethod
-    @custom_bwd(device_type='cuda')
+    @_custom_bwd
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         (xz, conv1d_weight, conv1d_bias, x_dbl, x_proj_weight, delta_proj_weight, 
@@ -503,7 +517,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
 class MambaInnerFn(torch.autograd.Function):
 
     @staticmethod
-    @custom_fwd(device_type='cuda')
+    @_custom_fwd
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
@@ -579,7 +593,7 @@ class MambaInnerFn(torch.autograd.Function):
         return F.linear(rearrange(out_z, "b d l -> b l d"), out_proj_weight, out_proj_bias)
 
     @staticmethod
-    @custom_bwd(device_type='cuda')
+    @_custom_bwd
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         assert causal_conv1d_cuda is not None, "causal_conv1d_cuda is not available. Please install causal-conv1d."
@@ -654,7 +668,7 @@ class MambaInnerFn(torch.autograd.Function):
 class BiMambaInnerFn(torch.autograd.Function):
 
     @staticmethod
-    @custom_fwd(device_type='cuda')
+    @_custom_fwd
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
@@ -734,7 +748,7 @@ class BiMambaInnerFn(torch.autograd.Function):
         return F.linear(rearrange(out_z, "b d l -> b l d"), out_proj_weight, out_proj_bias)
 
     @staticmethod
-    @custom_bwd(device_type='cuda')
+    @_custom_bwd
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         (xz, conv1d_weight, conv1d_bias, x_dbl, x_proj_weight, delta_proj_weight, out_proj_weight,
