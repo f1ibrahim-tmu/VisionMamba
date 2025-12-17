@@ -10,7 +10,7 @@ try:
     from mmseg.engine import SegEvaluator
 except ImportError:
     SegEvaluator = None
-from mmseg.utils import get_root_logger
+from mmengine.logging import MMLogger
 # MMSegmentation ≥ 1.2: build_dataset and build_dataloader moved to mmengine.dataset
 try:
     # MMSeg >= 1.2
@@ -52,7 +52,10 @@ def train_segmentor(model,
                     timestamp=None,
                     meta=None):
     """Launch segmentor training."""
-    logger = get_root_logger(cfg.log_level)
+    logger = MMLogger.get_instance(
+        name='mmseg',
+        log_level=cfg.log_level
+    )
 
     # Prepare data loaders - support both MMEngine format and legacy format
     train_dataloader = None

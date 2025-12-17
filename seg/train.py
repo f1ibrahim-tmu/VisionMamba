@@ -26,7 +26,12 @@ except ImportError:
     # Older MMSeg
     from mmseg.datasets import build_dataset
 from mmseg.models import build_segmentor
-from mmseg.utils import collect_env, get_root_logger
+from mmengine.logging import MMLogger
+# collect_env moved to mmengine.utils in MMSeg 1.x
+try:
+    from mmengine.utils import collect_env
+except ImportError:
+    from mmseg.utils import collect_env
 
 from backbone import vim
 
@@ -115,7 +120,11 @@ def main():
     # init the logger before other steps
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
-    logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
+    logger = MMLogger.get_instance(
+        name='mmseg',
+        log_file=log_file,
+        log_level=cfg.log_level
+    )
 
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged

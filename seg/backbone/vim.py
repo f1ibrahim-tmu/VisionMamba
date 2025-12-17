@@ -8,7 +8,7 @@ from timm.models.vision_transformer import _load_weights
 import torch.utils.checkpoint as checkpoint
 
 from mmcv_custom import load_checkpoint
-from mmseg.utils import get_root_logger
+from mmengine.logging import MMLogger
 # MMSegmentation 1.0.0+ uses registry system
 try:
     from mmseg.registry import MODELS as BACKBONES
@@ -129,7 +129,7 @@ class VisionMambaSeg(VisionMamba):
 
         if isinstance(pretrained, str):
             self.apply(_init_weights)
-            logger = get_root_logger()
+            logger = MMLogger.get_instance(name='mmseg')
 
             # load_checkpoint(self, pretrained, strict=False, logger=logger)
 
