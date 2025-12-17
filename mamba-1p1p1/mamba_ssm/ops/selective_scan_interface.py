@@ -4,14 +4,16 @@ import torch
 import torch.nn.functional as F
 
 # Handle PyTorch version compatibility for custom_fwd/custom_bwd
-# torch.amp was introduced in PyTorch 2.4, older versions use torch.cuda.amp
-if hasattr(torch, 'amp'):
+# torch.amp.custom_fwd/custom_bwd was introduced in PyTorch 2.4, older versions use torch.cuda.amp
+try:
     from torch.amp import custom_bwd, custom_fwd
+    # Successfully imported from torch.amp (PyTorch 2.4+)
     def _custom_fwd(func):
         return custom_fwd(device_type='cuda')(func)
     def _custom_bwd(func):
         return custom_bwd(device_type='cuda')(func)
-else:
+except ImportError:
+    # Fallback to torch.cuda.amp for older PyTorch versions
     from torch.cuda.amp import custom_bwd, custom_fwd
     def _custom_fwd(func):
         return custom_fwd(func)
