@@ -97,16 +97,25 @@ def train_segmentor(model,
         val_dataloader_cfg['sampler'] = dict(type='DefaultSampler', shuffle=False)
 
     # build optimizer - MMEngine uses optim_wrapper
+    def remove_delete_keys(d):
+        """Recursively remove _delete_ keys from dict (config inheritance artifact)."""
+        if isinstance(d, dict):
+            d.pop('_delete_', None)
+            for v in d.values():
+                remove_delete_keys(v)
+        return d
+    
     if hasattr(cfg, 'optim_wrapper'):
-        # Convert to dict and remove config inheritance keys like _delete_
-        if hasattr(cfg.optim_wrapper, 'to_dict'):
-            optim_wrapper_cfg = cfg.optim_wrapper.to_dict()
-        else:
-            optim_wrapper_cfg = dict(cfg.optim_wrapper)
+        # Deep copy and convert to dict, then remove _delete_ keys
+        import copy
+        optim_wrapper_cfg = copy.deepcopy(cfg.optim_wrapper)
+        if hasattr(optim_wrapper_cfg, 'to_dict'):
+            optim_wrapper_cfg = optim_wrapper_cfg.to_dict()
+        elif not isinstance(optim_wrapper_cfg, dict):
+            optim_wrapper_cfg = dict(optim_wrapper_cfg)
         
-        # Remove _delete_ from optimizer config if present (config inheritance artifact)
-        if 'optimizer' in optim_wrapper_cfg and isinstance(optim_wrapper_cfg['optimizer'], dict):
-            optim_wrapper_cfg['optimizer'].pop('_delete_', None)
+        # Recursively remove _delete_ from all nested dicts
+        remove_delete_keys(optim_wrapper_cfg)
     else:
         # Convert old optimizer config to optim_wrapper format
         optim_wrapper_cfg = dict(
