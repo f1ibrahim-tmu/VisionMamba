@@ -231,11 +231,12 @@ class VisionMambaSeg(VisionMamba):
         # MMSeg 1.x passes inputs as a list containing the tensor
         if isinstance(x, (list, tuple)):
             x = x[0]
-        # Debug: print shape to understand input format
-        print(f"[DEBUG] VisionMambaSeg input shape: {x.shape}, ndim: {x.dim()}")
+        # Handle 3D input (C, H, W) -> (1, C, H, W)
         if x.dim() == 3:
-            # Single image without batch dim: (C, H, W) -> (1, C, H, W)
             x = x.unsqueeze(0)
+        # Ensure float type (pipeline may pass uint8)
+        if not x.is_floating_point():
+            x = x.float()
         B, C, H, W = x.shape
         # x, (Hp, Wp) = self.patch_embed(x)
         x = self.patch_embed(x)

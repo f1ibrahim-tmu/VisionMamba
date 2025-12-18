@@ -5,6 +5,16 @@ data_path = '/dataset/ade20k/ADEChallengeData2016'
 data_total = data_root + data_path
 crop_size = (512, 512)
 
+# Data preprocessor handles normalization in MMSeg 1.x
+data_preprocessor = dict(
+    type='SegDataPreProcessor',
+    mean=[123.675, 116.28, 103.53],
+    std=[58.395, 57.12, 57.375],
+    bgr_to_rgb=True,
+    pad_val=0,
+    seg_pad_val=255,
+    size=crop_size)
+
 # MMSeg 1.x pipeline format
 train_pipeline = [
     dict(type='LoadImageFromFile'),
