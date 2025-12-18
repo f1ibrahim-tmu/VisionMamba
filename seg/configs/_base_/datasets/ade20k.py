@@ -49,7 +49,7 @@ test_pipeline = [
 #     dict(type='Collect', keys=['img']),
 # ]
 
-# MMEngine format: explicit dataloader configs
+# MMSeg 1.x format: uses data_prefix instead of img_dir/ann_dir
 train_dataloader = dict(
     batch_size=4,
     num_workers=4,
@@ -58,8 +58,7 @@ train_dataloader = dict(
     dataset=dict(
         type=dataset_type,
         data_root=data_total,
-        img_dir='images/training',
-        ann_dir='annotations/training',
+        data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
         pipeline=train_pipeline)
 )
 
@@ -71,8 +70,7 @@ val_dataloader = dict(
     dataset=dict(
         type=dataset_type,
         data_root=data_total,
-        img_dir='images/validation',
-        ann_dir='annotations/validation',
+        data_prefix=dict(img_path='images/validation', seg_map_path='annotations/validation'),
         pipeline=test_pipeline)
 )
 
@@ -84,31 +82,6 @@ test_dataloader = dict(
     dataset=dict(
         type=dataset_type,
         data_root=data_total,
-        img_dir='images/validation',
-        ann_dir='annotations/validation',
+        data_prefix=dict(img_path='images/validation', seg_map_path='annotations/validation'),
         pipeline=test_pipeline)
-)
-
-# Backward compatibility: keep old format for legacy code
-data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=4,
-    train=dict(
-        type=dataset_type,
-        data_root=data_total,
-        img_dir='images/training',
-        ann_dir='annotations/training',
-        pipeline=train_pipeline),
-    val=dict(
-        type=dataset_type,
-        data_root=data_total,
-        img_dir='images/validation',
-        ann_dir='annotations/validation',
-        pipeline=test_pipeline),
-    test=dict(
-        type=dataset_type,
-        data_root=data_total,
-        img_dir='images/validation',
-        ann_dir='annotations/validation',
-        pipeline=test_pipeline),
 )
