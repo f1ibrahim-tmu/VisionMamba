@@ -1,8 +1,8 @@
 #!/bin/bash
 # Higher-Order Hold discretization for Vision Mamba segmentation on ADE20K
 
-SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_highorder.py
-PRETRAIN_CKPT=home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/vim_tiny_highorder/best_checkpoint.pth
+SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_highorder.py
+PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_highorder/best_checkpoint.pth
 # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
