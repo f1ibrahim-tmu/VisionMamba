@@ -54,6 +54,11 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
     if not validate:
         cfg.val_dataloader = None
         cfg.val_cfg = None
+        cfg.val_evaluator = None
+    else:
+        # Ensure val_evaluator is set when validating
+        if not hasattr(cfg, 'val_evaluator') or cfg.val_evaluator is None:
+            cfg.val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])
     
     # Add meta info if provided
     if meta is not None:
