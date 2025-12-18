@@ -229,6 +229,9 @@ class VisionMambaSeg(VisionMamba):
         return residual
     
     def forward_features(self, x, inference_params=None):
+        # MMSeg 1.x passes inputs as a list of tensors
+        if isinstance(x, list):
+            x = x[0]
         B, C, H, W = x.shape
         # x, (Hp, Wp) = self.patch_embed(x)
         x = self.patch_embed(x)
