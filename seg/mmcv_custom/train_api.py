@@ -98,7 +98,15 @@ def train_segmentor(model,
 
     # build optimizer - MMEngine uses optim_wrapper
     if hasattr(cfg, 'optim_wrapper'):
-        optim_wrapper_cfg = cfg.optim_wrapper
+        # Convert to dict and remove config inheritance keys like _delete_
+        if hasattr(cfg.optim_wrapper, 'to_dict'):
+            optim_wrapper_cfg = cfg.optim_wrapper.to_dict()
+        else:
+            optim_wrapper_cfg = dict(cfg.optim_wrapper)
+        
+        # Remove _delete_ from optimizer config if present (config inheritance artifact)
+        if 'optimizer' in optim_wrapper_cfg and isinstance(optim_wrapper_cfg['optimizer'], dict):
+            optim_wrapper_cfg['optimizer'].pop('_delete_', None)
     else:
         # Convert old optimizer config to optim_wrapper format
         optim_wrapper_cfg = dict(
