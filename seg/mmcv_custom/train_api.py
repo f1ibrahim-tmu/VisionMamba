@@ -84,9 +84,5 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
     # - Checkpointing, logging, visualization, etc.
     runner = Runner.from_cfg(cfg)
     
-    # Set timestamp if provided
-    if timestamp is not None:
-        runner.timestamp = timestamp
-    
     # Start training
     runner.train()
