@@ -1,32 +1,39 @@
+"""
+MMSeg 1.x Training Script
+
+Uses Runner.from_cfg() to handle all model, optimizer, dataloader,
+and training loop building automatically.
+"""
+
 import argparse
-import copy
 import os
 import os.path as osp
 import time
 
-import mmcv
 import mmengine
 import torch
 from mmengine.dist import init_dist
 from mmengine.config import Config, DictAction
 from mmengine.utils import get_git_hash
+from mmengine.logging import MMLogger
 
 from mmseg import __version__
 try:
     from mmengine.runner import set_random_seed
 except ImportError:
-    # Fallback for older versions or if not available
     from mmcv_custom.train_api import set_random_seed
+
 from mmcv_custom import train_segmentor
-from mmseg.models import build_segmentor
-from mmengine.logging import MMLogger
+
 # collect_env moved to mmengine.utils in MMSeg 1.x
 try:
     from mmengine.utils import collect_env
 except ImportError:
     from mmseg.utils import collect_env
 
+# Import backbone to register it with MMSeg registry
 from backbone import vim
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
@@ -78,22 +85,25 @@ def main():
     cfg = Config.fromfile(args.config)
     if args.options is not None:
         cfg.merge_from_dict(args.options)
+    
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
 
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
-        # update configs according to CLI args if args.work_dir is not None
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
-        # use config filename as default work_dir if cfg.work_dir is None
         cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
+    
+    # Handle load_from and resume_from
     if args.load_from is not None:
         cfg.load_from = args.load_from
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
+    
+    # Set gpu_ids for compatibility
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids
     else:
@@ -102,32 +112,35 @@ def main():
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
         distributed = False
+        cfg.launcher = 'none'
     else:
         distributed = True
-        init_dist(args.launcher, **cfg.dist_params)
+        init_dist(args.launcher, **cfg.get('dist_params', {}))
+        cfg.launcher = args.launcher
 
     # create work_dir
     mmengine.utils.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    
     # dump config
     cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
+    
     # init the logger before other steps
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
     logger = MMLogger.get_instance(
         name='mmseg',
         log_file=log_file,
-        log_level=cfg.log_level
+        log_level=cfg.get('log_level', 'INFO')
     )
 
-    # init the meta dict to record some important information such as
-    # environment info and seed, which will be logged
+    # init the meta dict to record some important information
     meta = dict()
+    
     # log env info
     env_info_dict = collect_env()
     env_info = '\n'.join([f'{k}: {v}' for k, v in env_info_dict.items()])
     dash_line = '-' * 60 + '\n'
-    logger.info('Environment info:\n' + dash_line + env_info + '\n' +
-                dash_line)
+    logger.info('Environment info:\n' + dash_line + env_info + '\n' + dash_line)
     meta['env_info'] = env_info
 
     # log some basic info
@@ -136,93 +149,38 @@ def main():
 
     # set random seeds
     if args.seed is not None:
-        logger.info(f'Set random seed to {args.seed}, deterministic: '
-                    f'{args.deterministic}')
+        logger.info(f'Set random seed to {args.seed}, deterministic: {args.deterministic}')
         set_random_seed(args.seed, deterministic=args.deterministic)
     cfg.seed = args.seed
     meta['seed'] = args.seed
     meta['exp_name'] = osp.basename(args.config)
 
-    # MMSeg 1.x: train_cfg and test_cfg should be inside model config, not passed separately
-    # Passing them separately causes: "train_cfg specified in both outer field and model field"
-    model = build_segmentor(cfg.model)
-
-    logger.info(model)
-
-    # MMSeg 1.x: Pass dataset config dicts instead of building datasets
-    # Runner will handle dataset/dataloader building from configs
-    datasets = []
-    # Convert to dict if it's a ConfigDict
-    if hasattr(cfg.data.train, 'to_dict'):
-        train_dataset_cfg = cfg.data.train.to_dict()
-    elif hasattr(cfg.data.train, 'copy'):
-        train_dataset_cfg = cfg.data.train.copy()
-    else:
-        train_dataset_cfg = cfg.data.train
-    datasets.append(train_dataset_cfg)
+    # Ensure default_scope is set for registry
+    if not hasattr(cfg, 'default_scope'):
+        cfg.default_scope = 'mmseg'
     
-    # Check if validation should be included
+    # Ensure env_cfg is set for Runner
+    if not hasattr(cfg, 'env_cfg'):
+        cfg.env_cfg = dict(
+            cudnn_benchmark=cfg.get('cudnn_benchmark', False),
+            mp_cfg=dict(mp_start_method='fork', opencv_num_threads=0),
+            dist_cfg=dict(backend='nccl')
+        )
+    
+    # Ensure randomness config
+    if not hasattr(cfg, 'randomness'):
+        cfg.randomness = dict(seed=args.seed, deterministic=args.deterministic)
+    
+    # Run training using Runner.from_cfg()
+    # This handles everything: model, optimizer, dataloaders, training loop
     validate_flag = not args.no_validate
-    if validate_flag and hasattr(cfg.data, 'val'):
-        # Convert to dict if it's a ConfigDict
-        if hasattr(cfg.data.val, 'to_dict'):
-            val_dataset_cfg = cfg.data.val.to_dict()
-        else:
-            val_dataset_cfg = copy.deepcopy(cfg.data.val)
-        
-        # Ensure validation uses training pipeline
-        if isinstance(train_dataset_cfg, dict) and 'pipeline' in train_dataset_cfg:
-            val_dataset_cfg['pipeline'] = train_dataset_cfg['pipeline']
-        elif hasattr(cfg.data.train, 'pipeline'):
-            if isinstance(val_dataset_cfg, dict):
-                val_dataset_cfg['pipeline'] = cfg.data.train.pipeline
-            else:
-                val_dataset_cfg.pipeline = cfg.data.train.pipeline
-        datasets.append(val_dataset_cfg)
-    
-    # Get CLASSES and PALETTE from dataset config for checkpoint metadata
-    # Note: MMSeg 1.x uses default_hooks instead of checkpoint_config
-    # This section is optional - Runner handles checkpoint saving via default_hooks
-    checkpoint_config = cfg.get('checkpoint_config', None)
-    if checkpoint_config is not None:
-        classes = None
-        palette = None
-        # Try to get from dataset config
-        if isinstance(train_dataset_cfg, dict):
-            classes = train_dataset_cfg.get('CLASSES', None)
-            palette = train_dataset_cfg.get('PALETTE', None)
-        elif hasattr(train_dataset_cfg, 'CLASSES'):
-            classes = train_dataset_cfg.CLASSES
-            palette = getattr(train_dataset_cfg, 'PALETTE', None)
-        
-        # Fallback to model if available
-        if classes is None and hasattr(model, 'CLASSES'):
-            classes = model.CLASSES
-        if palette is None and hasattr(model, 'PALETTE'):
-            palette = model.PALETTE
-        
-        if classes is not None:
-            checkpoint_config.meta = dict(
-                mmseg_version=f'{__version__}+{get_git_hash()[:7]}',
-                config=cfg.pretty_text,
-                CLASSES=classes,
-                PALETTE=palette if palette is not None else None
-            )
-    
-    # Set model.CLASSES if available from config
-    if isinstance(train_dataset_cfg, dict) and 'CLASSES' in train_dataset_cfg:
-        model.CLASSES = train_dataset_cfg['CLASSES']
-    elif hasattr(train_dataset_cfg, 'CLASSES'):
-        model.CLASSES = train_dataset_cfg.CLASSES
-    
     train_segmentor(
-        model,
-        datasets,
         cfg,
         distributed=distributed,
         validate=validate_flag,
         timestamp=timestamp,
-        meta=meta)
+        meta=meta
+    )
 
 
 if __name__ == '__main__':
