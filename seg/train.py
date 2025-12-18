@@ -24,8 +24,8 @@ except ImportError:
     from mmcv_custom.train_api import set_random_seed
 
 from mmcv_custom import train_segmentor
-# Import custom optimizer constructor to register it (force=True overwrites MMSeg's)
-from mmcv_custom import LayerDecayOptimizerConstructor
+# Import custom optimizer constructor to register it
+from mmcv_custom import VimLayerDecayOptimizerConstructor
 
 # collect_env moved to mmengine.utils in MMSeg 1.x
 try:
