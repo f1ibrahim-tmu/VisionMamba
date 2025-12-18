@@ -60,6 +60,13 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
         if not hasattr(cfg, 'val_evaluator') or cfg.val_evaluator is None:
             cfg.val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])
     
+    # Ensure test_dataloader/test_cfg/test_evaluator are consistent (all None or all set)
+    has_test_dataloader = hasattr(cfg, 'test_dataloader') and cfg.test_dataloader is not None
+    has_test_cfg = hasattr(cfg, 'test_cfg') and cfg.test_cfg is not None
+    if has_test_dataloader or has_test_cfg:
+        if not hasattr(cfg, 'test_evaluator') or cfg.test_evaluator is None:
+            cfg.test_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])
+    
     # Add meta info if provided
     if meta is not None:
         if not hasattr(cfg, 'meta'):
