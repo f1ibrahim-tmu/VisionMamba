@@ -22,7 +22,7 @@ fi
 CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 \
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
-    --seed 0 --deterministic \
+    --seed 0 \
     --options model.backbone.pretrained=None \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
