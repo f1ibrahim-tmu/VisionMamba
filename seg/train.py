@@ -181,8 +181,10 @@ def main():
         datasets.append(val_dataset_cfg)
     
     # Get CLASSES and PALETTE from dataset config for checkpoint metadata
-    # Try to get from dataset config, fallback to model if available
-    if cfg.checkpoint_config is not None:
+    # Note: MMSeg 1.x uses default_hooks instead of checkpoint_config
+    # This section is optional - Runner handles checkpoint saving via default_hooks
+    checkpoint_config = cfg.get('checkpoint_config', None)
+    if checkpoint_config is not None:
         classes = None
         palette = None
         # Try to get from dataset config
@@ -200,7 +202,7 @@ def main():
             palette = model.PALETTE
         
         if classes is not None:
-            cfg.checkpoint_config.meta = dict(
+            checkpoint_config.meta = dict(
                 mmseg_version=f'{__version__}+{get_git_hash()[:7]}',
                 config=cfg.pretty_text,
                 CLASSES=classes,
