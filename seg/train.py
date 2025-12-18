@@ -143,10 +143,9 @@ def main():
     meta['seed'] = args.seed
     meta['exp_name'] = osp.basename(args.config)
 
-    model = build_segmentor(
-        cfg.model,
-        train_cfg=cfg.get('train_cfg'),
-        test_cfg=cfg.get('test_cfg'))
+    # MMSeg 1.x: train_cfg and test_cfg should be inside model config, not passed separately
+    # Passing them separately causes: "train_cfg specified in both outer field and model field"
+    model = build_segmentor(cfg.model)
 
     logger.info(model)
 
