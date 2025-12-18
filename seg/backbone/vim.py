@@ -228,9 +228,10 @@ class VisionMambaSeg(VisionMamba):
         return residual
     
     def forward_features(self, x, inference_params=None):
-        # MMSeg 1.x passes inputs as a list of tensors
-        if isinstance(x, list):
-            x = x[0]
+        # MMSeg 1.x passes inputs as a tensor directly (not a list)
+        # Handle both 3D (C, H, W) and 4D (B, C, H, W) inputs
+        if x.dim() == 3:
+            x = x.unsqueeze(0)  # Add batch dimension
         B, C, H, W = x.shape
         # x, (Hp, Wp) = self.patch_embed(x)
         x = self.patch_embed(x)
