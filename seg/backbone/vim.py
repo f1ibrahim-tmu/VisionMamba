@@ -51,7 +51,16 @@ class VisionMambaSeg(VisionMamba):
         ft_seq_len = img_size // patch_size
         kwargs['ft_seq_len'] = ft_seq_len
 
-        super().__init__(img_size, patch_size, stride, depth, embed_dim, in_chans, num_classes, **kwargs)
+        super().__init__(
+            img_size=img_size,
+            patch_size=patch_size,
+            stride=stride,
+            depth=depth,
+            embed_dim=embed_dim,
+            channels=in_chans,
+            num_classes=num_classes,
+            **kwargs
+        )
 
         self.use_checkpoint = use_checkpoint
         self.out_indices = out_indices
