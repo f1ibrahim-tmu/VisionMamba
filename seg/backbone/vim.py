@@ -228,13 +228,9 @@ class VisionMambaSeg(VisionMamba):
         return residual
     
     def forward_features(self, x, inference_params=None):
-        # MMSeg 1.x passes (B, C, H, W) tensors to backbone
-        # Validate input shape
-        if x.dim() != 4:
-            raise ValueError(
-                f"VisionMambaSeg backbone expects 4D input (B, C, H, W), "
-                f"got {x.dim()}D tensor with shape {x.shape}"
-            )
+        # MMSeg 1.x passes inputs as a list containing the tensor
+        if isinstance(x, (list, tuple)):
+            x = x[0]
         B, C, H, W = x.shape
         # x, (Hp, Wp) = self.patch_embed(x)
         x = self.patch_embed(x)
