@@ -2,9 +2,8 @@ import math
 import torch
 import torch.nn as nn
 
-from timm.models.layers import DropPath
-from timm.models.layers import trunc_normal_
-from timm.models.vision_transformer import _load_weights
+from timm.layers import DropPath, trunc_normal_
+from timm.models import _load_weights
 import torch.utils.checkpoint as checkpoint
 
 from mmcv_custom import load_checkpoint
