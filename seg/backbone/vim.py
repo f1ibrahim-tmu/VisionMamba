@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 from timm.layers import DropPath, trunc_normal_
-from timm.models import _load_weights
+# _load_weights removed - was imported but unused
 import torch.utils.checkpoint as checkpoint
 
 from mmcv_custom import load_checkpoint
