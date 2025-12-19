@@ -129,11 +129,6 @@ class SelectiveScanFn(torch.autograd.Function):
         else:
             out, last_state = result
             return out, last_state
-        if not return_last_state:
-            return result
-        else:
-            out, last_state = result
-            return out, last_state
 
     @staticmethod
     def backward(ctx, dout, *args):
