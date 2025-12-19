@@ -1,0 +1,17 @@
+
+Currently Loaded Modules:
+  1) CCconfig            7) ucx/1.14.1            13) aocl-blas/5.1           19) ucc-cuda/1.2.0
+  2) gentoo/2023   (S)   8) libfabric/1.18.0      14) aocl-lapack/5.1         20) cuda/12.2      (t)
+  3) StdEnv/2023   (S)   9) pmix/4.2.4            15) cudacore/.12.2.2 (H,t)  21) rust/1.91.0    (t)
+  4) gcccore/.12.3 (H)  10) ucc/1.2.0             16) gdrcopy/2.3.1
+  5) gcc/12.3      (t)  11) openmpi/4.1.5    (m)  17) ucx-cuda/1.14.1
+  6) hwloc/2.9.1        12) flexiblas/3.3.1       18) nccl/2.18.3      (t)
+
+  Where:
+   H:  Hidden Module
+   S:  Module is Sticky, requires --force to unload or purge
+   m:  MPI implementations / Implémentations MPI
+   t:  Tools for development / Outils de développement
+
+ 
+

@@ -1,0 +1,14 @@
+# Core framework
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+
+# CUDA runtime is provided by conda (pytorch-cuda=12.1)
+# Do NOT let pip touch CUDA
+
+# Mamba stack compatibility
+causal-conv1d==1.4.0
+
+# Hard safety rails
+numpy==1.26.4
+sympy==1.12
