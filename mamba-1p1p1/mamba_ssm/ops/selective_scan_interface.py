@@ -46,7 +46,7 @@ class SelectiveScanFn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                return_last_state=False, discretization_method="zoh"):
+                return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
         if u.stride(-1) != 1:
             u = u.contiguous()
         if delta.stride(-1) != 1:
@@ -66,6 +66,12 @@ class SelectiveScanFn(torch.autograd.Function):
             C = rearrange(C, "b dstate l -> b 1 dstate l")
             ctx.squeeze_C = True
         
+        # Determine which implementation to use
+        # use_cuda_kernel: True = force CUDA, False = force Python, None = auto (try CUDA first)
+        force_cuda = use_cuda_kernel is True
+        force_python = use_cuda_kernel is False
+        auto_select = use_cuda_kernel is None
+        
         # Map discretization method string to enum value
         disc_method_map = {
             "zoh": 0,
@@ -77,13 +83,14 @@ class SelectiveScanFn(torch.autograd.Function):
         }
         disc_method_enum = disc_method_map.get(discretization_method, 0)
         
-        # Try CUDA kernel first (now supports all methods)
-        if selective_scan_cuda is not None:
+        # Try CUDA kernel if requested (force or auto-select)
+        if (force_cuda or auto_select) and selective_scan_cuda is not None:
             try:
                 out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum)
                 ctx.delta_softplus = delta_softplus
                 ctx.has_z = z is not None
                 ctx.discretization_method = discretization_method
+                ctx.use_cuda_kernel = True
                 last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
                 if not ctx.has_z:
                     ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
@@ -94,34 +101,32 @@ class SelectiveScanFn(torch.autograd.Function):
                     return out_z if not return_last_state else (out_z, last_state)
             except Exception as e:
                 # Fall back to reference implementation if CUDA kernel fails
-                print(f"Warning: CUDA kernel failed for {discretization_method}, falling back to reference: {e}")
-                result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
-                                          return_last_state, discretization_method)
-                if not return_last_state:
-                    return result
-                else:
-                    out, last_state = result
-                    return out, last_state
+                if force_cuda:
+                    # If CUDA was forced but failed, raise the error
+                    raise RuntimeError(f"CUDA kernel failed for {discretization_method} (use_cuda_kernel=True): {e}")
+                # Otherwise, fall through to Python reference
+                if auto_select:
+                    # Only print warning in auto-select mode
+                    import warnings
+                    warnings.warn(f"CUDA kernel failed for {discretization_method}, falling back to Python reference: {e}", UserWarning)
         
-        # Fallback to reference implementation
+        # Use Python reference implementation (either forced or as fallback)
         result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
                                   return_last_state, discretization_method)
+        ctx.delta_softplus = delta_softplus
+        ctx.has_z = z is not None
+        ctx.discretization_method = discretization_method
+        ctx.use_cuda_kernel = False
         if not return_last_state:
             return result
         else:
             out, last_state = result
             return out, last_state
-        ctx.delta_softplus = delta_softplus
-        ctx.has_z = z is not None
-        ctx.discretization_method = discretization_method
-        last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
-        if not ctx.has_z:
-            ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
-            return out if not return_last_state else (out, last_state)
+        if not return_last_state:
+            return result
         else:
-            ctx.save_for_backward(u, delta, A, B, C, D, z, delta_bias, x, out)
-            out_z = rest[0]
-            return out_z if not return_last_state else (out_z, last_state)
+            out, last_state = result
+            return out, last_state
 
     @staticmethod
     def backward(ctx, dout, *args):
@@ -159,19 +164,25 @@ class SelectiveScanFn(torch.autograd.Function):
 
 
 def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                     return_last_state=False, discretization_method="zoh"):
+                     return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
     """if return_last_state is True, returns (out, last_state)
     last_state has shape (batch, dim, dstate). Note that the gradient of the last state is
     not considered in the backward pass.
     
-    discretization_method: str, one of ["zoh", "foh", "poly", "bilinear", "highorder"]
-        zoh: Zero Order Hold (default in original implementation)
-        foh: First Order Hold
-        poly: Polynomial interpolation
-        bilinear: Bilinear (Tustin) Transform
-        highorder: Higher-order hold
+    Args:
+        discretization_method: str, one of ["zoh", "foh", "poly", "bilinear", "highorder", "rk4"]
+            zoh: Zero Order Hold (default in original implementation)
+            foh: First Order Hold
+            poly: Polynomial interpolation
+            bilinear: Bilinear (Tustin) Transform
+            highorder: Higher-order hold
+            rk4: Runge-Kutta 4th order
+        use_cuda_kernel: bool or None
+            If True: Force use of CUDA kernel (if available)
+            If False: Force use of Python reference implementation
+            If None: Auto-select (try CUDA first, fallback to Python)
     """
-    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method)
+    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method, use_cuda_kernel)
 
 
 def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
