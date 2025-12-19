@@ -13,7 +13,6 @@ cd "$PROJECT_ROOT"
 
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     ./main.py \
-    --master_port=0 \
     --model vim_tiny_patch16_224_bimambav2_foh \
     --batch-size 512 \
     --drop-path 0.0 \
