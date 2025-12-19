@@ -53,6 +53,7 @@ class Mamba(nn.Module):
         if_divide_out=False,
         init_layer_scale=None,
         discretization_method="zoh",  # New parameter for discretization method
+        use_cuda_kernel=None,  # None=auto, True=force CUDA, False=force Python
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -67,6 +68,14 @@ class Mamba(nn.Module):
         self.bimamba_type = bimamba_type
         self.if_divide_out = if_divide_out
         self.discretization_method = discretization_method  # Store the discretization method
+        # Check environment variable for use_cuda_kernel override
+        import os
+        env_use_cuda = os.environ.get('VIM_USE_CUDA_KERNEL', None)
+        if env_use_cuda is not None:
+            # Environment variable takes precedence
+            self.use_cuda_kernel = env_use_cuda.lower() in ('1', 'true', 'yes', 'on')
+        else:
+            self.use_cuda_kernel = use_cuda_kernel  # Use provided value or None (auto)
 
         self.init_layer_scale = init_layer_scale
         if init_layer_scale is not None:
@@ -302,6 +311,7 @@ class Mamba(nn.Module):
                 delta_softplus=True,
                 return_last_state=ssm_state is not None,
                 discretization_method=self.discretization_method,  # Pass the discretization method
+                use_cuda_kernel=self.use_cuda_kernel,  # Pass the CUDA kernel preference
             )
             if ssm_state is not None:
                 y, last_state = y
