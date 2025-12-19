@@ -66,18 +66,51 @@ class SelectiveScanFn(torch.autograd.Function):
             C = rearrange(C, "b dstate l -> b 1 dstate l")
             ctx.squeeze_C = True
         
-        # For the CUDA implementation, we only support ZOH for now
-        # When other methods are requested, fall back to the reference implementation
-        if discretization_method != "zoh" and selective_scan_cuda is not None:
-            result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
-                                      return_last_state, discretization_method)
-            if not return_last_state:
-                return result
-            else:
-                out, last_state = result
-                return out, last_state
+        # Map discretization method string to enum value
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
         
-        out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus)
+        # Try CUDA kernel first (now supports all methods)
+        if selective_scan_cuda is not None:
+            try:
+                out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum)
+                ctx.delta_softplus = delta_softplus
+                ctx.has_z = z is not None
+                ctx.discretization_method = discretization_method
+                last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
+                if not ctx.has_z:
+                    ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
+                    return out if not return_last_state else (out, last_state)
+                else:
+                    ctx.save_for_backward(u, delta, A, B, C, D, z, delta_bias, x, out)
+                    out_z = rest[0]
+                    return out_z if not return_last_state else (out_z, last_state)
+            except Exception as e:
+                # Fall back to reference implementation if CUDA kernel fails
+                print(f"Warning: CUDA kernel failed for {discretization_method}, falling back to reference: {e}")
+                result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
+                                          return_last_state, discretization_method)
+                if not return_last_state:
+                    return result
+                else:
+                    out, last_state = result
+                    return out, last_state
+        
+        # Fallback to reference implementation
+        result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
+                                  return_last_state, discretization_method)
+        if not return_last_state:
+            return result
+        else:
+            out, last_state = result
+            return out, last_state
         ctx.delta_softplus = delta_softplus
         ctx.has_z = z is not None
         ctx.discretization_method = discretization_method
