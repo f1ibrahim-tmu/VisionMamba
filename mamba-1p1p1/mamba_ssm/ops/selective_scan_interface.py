@@ -241,20 +241,90 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 deltaB_u = torch.einsum('bdl,bdnl,bdl->bdln', delta, B, u)
     
     elif discretization_method == "foh":
-        # First Order Hold
-        # For FOH: A_d = exp(A*delta), B_d = (A^-1)*(A_d - I)*B
+        # First Order Hold (Correct Formula)
+        # For FOH: A_d = exp(A*delta), B_d = A^(-2) * (exp(A*delta) - I - A*delta) * B
+        # Using Taylor series expansion to avoid division:
+        # (exp(A*Δ) - 1 - A*Δ) / A^2 = Δ²/2! + A*Δ³/3! + A²*Δ⁴/4! + A³*Δ⁵/5! + ...
+        # So: B_d = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120) * B
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
-        # Calculate (A_d - I) / A
-        deltaA_minus_I_div_A = (deltaA - 1.0) / A.unsqueeze(0).unsqueeze(-1)
+        
+        # Compute powers of delta (bdl shape)
+        delta_sq = delta ** 2
+        delta_cubed = delta ** 3
+        delta_4th = delta ** 4
+        delta_5th = delta ** 5
         
         if not is_variable_B:
-            deltaB_u = torch.einsum('bdln,dn,bdl->bdln', deltaA_minus_I_div_A, B, u)
+            # B_d * u = (Δ²/2 * B + A*Δ³/6 * B + A²*Δ⁴/24 * B + A³*Δ⁵/120 * B) * u
+            # Compute coefficient: Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120 for each (b,d,l,n)
+            # Then multiply by B and u
+            
+            # Expand delta powers to (B, D, L, 1) for broadcasting with A (D, N)
+            delta_sq_exp = delta_sq.unsqueeze(-1)  # (B, D, L, 1)
+            delta_cubed_exp = delta_cubed.unsqueeze(-1)
+            delta_4th_exp = delta_4th.unsqueeze(-1)
+            delta_5th_exp = delta_5th.unsqueeze(-1)
+            
+            A_exp = A.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
+            A_sq = A ** 2
+            A_cubed = A ** 3
+            A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
+            A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
+            B_exp = B.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
+            
+            # coeff * B = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120) * B
+            deltaB = (delta_sq_exp / 2.0 * B_exp +
+                      delta_cubed_exp / 6.0 * A_exp * B_exp +
+                      delta_4th_exp / 24.0 * A_sq_exp * B_exp +
+                      delta_5th_exp / 120.0 * A_cubed_exp * B_exp)  # (B, D, L, N)
+            
+            deltaB_u = deltaB * u.unsqueeze(-1)  # (B, D, L, N)
         else:
             if B.dim() == 3:
-                deltaB_u = torch.einsum('bdln,bnl,bdl->bdln', deltaA_minus_I_div_A, B, u)
+                # B is (B, N, L)
+                delta_sq_exp = delta_sq.unsqueeze(-1)  # (B, D, L, 1)
+                delta_cubed_exp = delta_cubed.unsqueeze(-1)
+                delta_4th_exp = delta_4th.unsqueeze(-1)
+                delta_5th_exp = delta_5th.unsqueeze(-1)
+                
+                A_exp = A.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
+                A_sq = A ** 2
+                A_cubed = A ** 3
+                A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
+                A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
+                
+                # B: (B, N, L) -> (B, 1, L, N) for broadcasting
+                B_exp = B.unsqueeze(1).permute(0, 1, 3, 2)  # (B, 1, L, N)
+                
+                deltaB = (delta_sq_exp / 2.0 * B_exp +
+                          delta_cubed_exp / 6.0 * A_exp * B_exp +
+                          delta_4th_exp / 24.0 * A_sq_exp * B_exp +
+                          delta_5th_exp / 120.0 * A_cubed_exp * B_exp)  # (B, D, L, N)
+                
+                deltaB_u = deltaB * u.unsqueeze(-1)  # (B, D, L, N)
             else:
                 B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
-                deltaB_u = torch.einsum('bdln,bdnl,bdl->bdln', deltaA_minus_I_div_A, B, u)
+                
+                delta_sq_exp = delta_sq.unsqueeze(-1)
+                delta_cubed_exp = delta_cubed.unsqueeze(-1)
+                delta_4th_exp = delta_4th.unsqueeze(-1)
+                delta_5th_exp = delta_5th.unsqueeze(-1)
+                
+                A_exp = A.unsqueeze(0).unsqueeze(2)
+                A_sq = A ** 2
+                A_cubed = A ** 3
+                A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
+                A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
+                
+                # B: (B, D, N, L) -> (B, D, L, N) for proper broadcasting
+                B_exp = B.permute(0, 1, 3, 2)  # (B, D, L, N)
+                
+                deltaB = (delta_sq_exp / 2.0 * B_exp +
+                          delta_cubed_exp / 6.0 * A_exp * B_exp +
+                          delta_4th_exp / 24.0 * A_sq_exp * B_exp +
+                          delta_5th_exp / 120.0 * A_cubed_exp * B_exp)
+                
+                deltaB_u = deltaB * u.unsqueeze(-1)
     
     elif discretization_method == "bilinear":
         # Bilinear (Tustin) Transform

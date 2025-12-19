@@ -37,21 +37,47 @@ __device__ __forceinline__ auto compute_discretization(
 
         case DISCRETIZATION_FOH:
         {
-            // FOH: A_d = exp(A*delta), B_d = (A^-1)*(A_d - I)*B
-            // For scalar A: B_d = (exp(A*delta) - 1) / A * B
+            // FOH (Correct Formula): A_d = exp(A*delta), B_d = A^(-2) * (exp(A*delta) - I - A*delta) * B
+            // Using Taylor series expansion to avoid division:
+            // (exp(A*Δ) - 1 - A*Δ) / A^2 = Δ²/2! + A*Δ³/3! + A²*Δ⁴/4! + A³*Δ⁵/5! + ...
+            // So: B_d/B = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120)
+            //
+            // For this kernel, B is factored out and applied at output (as BC_val) for non-variable B.
+            // So we compute: B_d_u = coeff * u (without B, like ZOH computes delta*u)
+            // 
+            // For non-variable B: delta_u_val = delta * u, so u = delta_u_val / delta
+            //   Return: coeff * u = coeff * delta_u_val / delta
+            // For variable B: delta_u_val = B * delta * u
+            //   The B is already included, so we need: coeff * B * u = coeff * delta_u_val / delta
+            // Both cases: B_d_u = coeff * delta_u_val / delta
+            
             constexpr float kLog2e = M_LOG2E;
             float A_val_scaled = A_val * kLog2e;
-            float A_d_exp = exp2f(delta_val * A_val_scaled);
-            A_d = A_d_exp;
-            // Avoid division by zero
-            if (fabsf(A_val) > 1e-8f)
-            {
-                B_d_u = (A_d_exp - 1.0f) / A_val * B_val * delta_val;
-            }
-            else
-            {
-                // Use limit as A -> 0: B_d = delta * B
-                B_d_u = delta_u_val;
+            A_d = exp2f(delta_val * A_val_scaled);
+            
+            // Compute powers of delta
+            float delta_sq = delta_val * delta_val;
+            float delta_cubed = delta_sq * delta_val;
+            float delta_4th = delta_cubed * delta_val;
+            float delta_5th = delta_4th * delta_val;
+            
+            // Compute A powers
+            float A_sq = A_val * A_val;
+            float A_cubed = A_sq * A_val;
+            
+            // B_d/B coefficient (without B, which is handled at output)
+            float coeff = delta_sq / 2.0f +
+                          A_val * delta_cubed / 6.0f +
+                          A_sq * delta_4th / 24.0f +
+                          A_cubed * delta_5th / 120.0f;
+            
+            // Handle edge case when delta is very small
+            if (fabsf(delta_val) < 1e-8f) {
+                // Limit as delta -> 0: coeff -> 0, so use first-order term
+                B_d_u = delta_sq / 2.0f * delta_u_val / delta_val;
+            } else {
+                // B_d_u = coeff * u (where u is extracted from delta_u_val)
+                B_d_u = coeff * delta_u_val / delta_val;
             }
             break;
         }
@@ -143,12 +169,30 @@ __device__ __forceinline__ auto compute_discretization(
 
         case DISCRETIZATION_FOH:
         {
+            // FOH for complex A using Taylor series expansion
+            // B_d/B = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120)
             constexpr float kLog2e = M_LOG2E;
             complex_t delta_A = complex_t(delta_val * A_val.real_, delta_val * A_val.imag_);
             A_d = cexp2f(complex_t(delta_A.real_ * kLog2e, delta_A.imag_ * kLog2e));
-            complex_t A_inv = complex_t(1.0f / (A_val.real_ * A_val.real_ + A_val.imag_ * A_val.imag_), 0.0f) *
-                              complex_t(A_val.real_, -A_val.imag_);
-            B_d_u_complex = (A_d - complex_t(1.0f, 0.0f)) * A_inv * B_val * complex_t(delta_val, 0.0f);
+            
+            // Compute powers of delta
+            float delta_sq = delta_val * delta_val;
+            float delta_cubed = delta_sq * delta_val;
+            float delta_4th = delta_cubed * delta_val;
+            float delta_5th = delta_4th * delta_val;
+            
+            // Compute A powers (complex multiplication)
+            complex_t A_sq = A_val * A_val;
+            complex_t A_cubed = A_sq * A_val;
+            
+            // B_d/B coefficient
+            complex_t coeff = complex_t(delta_sq / 2.0f, 0.0f) +
+                              A_val * complex_t(delta_cubed / 6.0f, 0.0f) +
+                              A_sq * complex_t(delta_4th / 24.0f, 0.0f) +
+                              A_cubed * complex_t(delta_5th / 120.0f, 0.0f);
+            
+            // B_d_u = coeff * u (B handled at output)
+            B_d_u_complex = coeff * complex_t(delta_u_val / delta_val, 0.0f);
             break;
         }
 
