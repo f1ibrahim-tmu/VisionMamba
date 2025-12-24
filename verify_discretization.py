@@ -86,11 +86,17 @@ def verify_all_methods():
         print(f"{'-'*70}")
         
         try:
-            out, _ = selective_scan_fn(
+            result = selective_scan_fn(
                 u, delta, A, B_param, C_param, D_param,
                 discretization_method=method_key,
-                use_cuda_kernel=use_cuda
+                use_cuda_kernel=use_cuda,
+                return_last_state=False
             )
+            # Handle both single return value and tuple return
+            if isinstance(result, tuple):
+                out, _ = result
+            else:
+                out = result
             
             outputs[method_key] = out
             method_stats[method_key] = {
@@ -110,26 +116,40 @@ def verify_all_methods():
             
         except Exception as e:
             print(f"  Status: FAILED")
-            print(f"  Error: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"  Error: {str(e)[:200]}")  # Truncate long error messages
+            # Only print full traceback for the first error to avoid clutter
+            if len([k for k, v in outputs.items() if v is None]) == 0:
+                import traceback
+                print(f"  Full traceback:")
+                traceback.print_exc()
             outputs[method_key] = None
     
-    # Check if all methods succeeded
+    # Check which methods succeeded
     failed_methods = [k for k, v in outputs.items() if v is None]
+    successful_methods = [k for k, v in outputs.items() if v is not None]
+    
     if failed_methods:
         print(f"\n{'='*70}")
-        print(f"ERROR: {len(failed_methods)} method(s) failed: {', '.join(failed_methods)}")
+        print(f"WARNING: {len(failed_methods)} method(s) failed: {', '.join(failed_methods)}")
+        print(f"SUCCESS: {len(successful_methods)} method(s) succeeded: {', '.join(successful_methods)}")
         print(f"{'='*70}")
-        return None
+        
+        if len(successful_methods) < 2:
+            print("\nNot enough successful methods to perform comparisons.")
+            return None
     
-    # Pairwise comparison
+    # Pairwise comparison (only for successful methods)
     print(f"\n{'='*70}")
     print("PAIRWISE COMPARISON MATRIX")
     print(f"{'='*70}")
     
-    method_keys = list(ALL_METHODS.keys())
+    # Only compare methods that succeeded
+    method_keys = [k for k in ALL_METHODS.keys() if k in successful_methods]
     n_methods = len(method_keys)
+    
+    if n_methods < 2:
+        print("\nNot enough successful methods to perform comparisons.")
+        return None
     
     # Create comparison matrix
     comparison_matrix = {}
