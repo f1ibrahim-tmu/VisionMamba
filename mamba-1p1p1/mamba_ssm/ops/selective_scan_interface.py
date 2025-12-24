@@ -331,8 +331,18 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         # Ā = (I - ΔA/2)⁻¹(I + ΔA/2)
         # B̄ = (I - ΔA/2)⁻¹ΔB
         # This ensures stability: left half-plane maps to inside unit circle
-        half_delta_A = torch.einsum('bdl,dn->bdln', delta, A) * 0.5
-        I = torch.eye(dstate, device=A.device).unsqueeze(0).unsqueeze(0).unsqueeze(-1)
+        
+        # Compute half_delta_A as a vector: (batch, dim, seqlen, dstate)
+        half_delta_A_vec = torch.einsum('bdl,dn->bdln', delta, A) * 0.5
+        
+        # Convert to diagonal matrix: (batch, dim, seqlen, dstate, dstate)
+        # Each (b, d, l) gets a diagonal matrix with half_delta_A_vec[b, d, l, :] on the diagonal
+        half_delta_A = torch.diag_embed(half_delta_A_vec, dim1=-2, dim2=-1)
+        
+        # Create identity matrix with correct shape: (1, 1, 1, dstate, dstate) for broadcasting
+        I = torch.eye(dstate, device=A.device, dtype=A.dtype).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        # I now has shape (1, 1, 1, dstate, dstate) which will broadcast to (batch, dim, seqlen, dstate, dstate)
+        
         I_plus_half_delta_A = I + half_delta_A   # (I + ΔA/2)
         I_minus_half_delta_A = I - half_delta_A  # (I - ΔA/2)
         
@@ -343,26 +353,49 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                                           b=batch, d=dim, l=delta.size(2))
         
         # A_d = (I - A*delta/2)^-1 * (I + A*delta/2) (CORRECTED order)
-        deltaA = torch.matmul(I_minus_half_delta_A_inv, 
-                             rearrange(I_plus_half_delta_A, 'b d l n1 n2 -> b d l n1 n2'))
+        deltaA = torch.matmul(I_minus_half_delta_A_inv, I_plus_half_delta_A)
         
-        # Compute B_d = (I - ΔA/2)⁻¹ΔB (CORRECTED: use I - ΔA/2)
-        delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)
+        # Compute B_d = (I - ΔA/2)⁻¹ΔB
+        # For bilinear: B_d = (I - ΔA/2)⁻¹ * (delta * B) where delta is scalar and B is vector
         if not is_variable_B:
-            B_expanded = B.unsqueeze(0).unsqueeze(0).unsqueeze(-1)
-            deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_expanded * B_expanded)
-            deltaB_u = deltaB * u.unsqueeze(-1).unsqueeze(-1)
+            # B is (dim, dstate)
+            # For each (b, d, l), we have delta[b, d, l] (scalar) and B[d, :] (vector of shape dstate)
+            # delta * B should be (batch, dim, seqlen, dstate, 1)
+            # Expand B: (dim, dstate) -> (1, dim, 1, dstate, 1)
+            B_expanded = B.unsqueeze(0).unsqueeze(0).unsqueeze(-1)  # (1, dim, 1, dstate, 1)
+            # Expand delta: (batch, dim, seqlen) -> (batch, dim, seqlen, 1, 1)
+            delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
+            # delta * B: (batch, dim, seqlen, 1, 1) * (1, dim, 1, dstate, 1) -> (batch, dim, seqlen, dstate, 1)
+            # But we need to broadcast properly - B should be (1, dim, 1, dstate, 1) and delta (batch, dim, seqlen, 1, 1)
+            # Actually, we need to match dimensions: B[d, :] for each d, so B should be (1, dim, 1, dstate, 1)
+            delta_B = delta_expanded * B_expanded  # (batch, dim, seqlen, dstate, 1)
+            # Now multiply by inverse: (I - ΔA/2)⁻¹ * (delta * B)
+            deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_B)  # (batch, dim, seqlen, dstate, 1)
+            # Multiply by u: u has shape (batch, dim, seqlen), expand to (batch, dim, seqlen, 1)
+            deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
         else:
             # Handle variable B case 
             if B.dim() == 3:
-                B_expanded = B.unsqueeze(1).unsqueeze(-1)
-                deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_expanded * B_expanded)
-                deltaB_u = deltaB * u.unsqueeze(-1).unsqueeze(-1)
+                # B is (batch, dstate, seqlen) -> transpose to (batch, seqlen, dstate)
+                # Need to expand to (batch, dim, seqlen, dstate, 1)
+                B_transposed = B.permute(0, 2, 1)  # (batch, seqlen, dstate)
+                B_expanded = B_transposed.unsqueeze(1).unsqueeze(-1)  # (batch, 1, seqlen, dstate, 1)
+                # Expand to match dim dimension
+                B_expanded = repeat(B_expanded, 'b 1 l n 1 -> b d l n 1', d=dim)
+                delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
+                delta_B = delta_expanded * B_expanded  # (batch, dim, seqlen, dstate, 1)
+                deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_B)
+                deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
             else:
+                # B is (batch, n_groups, dstate, seqlen)
                 B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
-                B_expanded = B.unsqueeze(-1)
-                deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_expanded * B_expanded)
-                deltaB_u = deltaB * u.unsqueeze(-1).unsqueeze(-1)
+                # B is now (batch, dim, dstate, seqlen) -> permute to (batch, dim, seqlen, dstate)
+                B_permuted = B.permute(0, 1, 3, 2)  # (batch, dim, seqlen, dstate)
+                B_expanded = B_permuted.unsqueeze(-1)  # (batch, dim, seqlen, dstate, 1)
+                delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
+                delta_B = delta_expanded * B_expanded  # (batch, dim, seqlen, dstate, 1)
+                deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_B)
+                deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
     
     elif discretization_method == "poly":
         # Polynomial Interpolation (Correct Formula):
@@ -595,8 +628,19 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         C = repeat(C, "B G N L -> B (G H) N L", H=dim // C.shape[1])
     last_state = None
     
+    # Check if deltaA is a matrix (bilinear) or vector (other methods)
+    is_matrix_deltaA = deltaA.dim() == 5  # (batch, dim, seqlen, dstate, dstate)
+    
     for i in range(u.shape[2]):
-        x = deltaA[:, :, i] * x + deltaB_u[:, :, i]
+        if is_matrix_deltaA:
+            # Bilinear: deltaA is a matrix, use matrix-vector multiplication
+            # deltaA[:, :, i] has shape (batch, dim, dstate, dstate)
+            # x has shape (batch, dim, dstate)
+            # Need to do: deltaA[:, :, i] @ x.unsqueeze(-1) -> (batch, dim, dstate, 1) -> squeeze to (batch, dim, dstate)
+            x = torch.matmul(deltaA[:, :, i], x.unsqueeze(-1)).squeeze(-1) + deltaB_u[:, :, i]
+        else:
+            # Other methods: deltaA is a vector, use element-wise multiplication
+            x = deltaA[:, :, i] * x + deltaB_u[:, :, i]
         if not is_variable_C:
             y = torch.einsum('bdn,dn->bd', x, C)
         else:
