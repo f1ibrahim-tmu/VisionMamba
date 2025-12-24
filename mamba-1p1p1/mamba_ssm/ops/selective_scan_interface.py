@@ -606,21 +606,49 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         else:
             # Handle variable B case
             if B.dim() == 3:
-                AB = torch.einsum('dn,bnl->bdnl', A, B)
-                A2B = torch.einsum('dnm,bml->bdnl', A_squared, B)
-                A3B = torch.einsum('dnmk,bkl->bdnl', A_cubed, B)
+                # B is (batch, dstate, seqlen) = (B, N, L)
+                # Need to compute RK4 coefficients for each (b, d, l)
+                # For variable B, we need to handle per-sequence B values
                 
-                k1 = delta.unsqueeze(-1).unsqueeze(-1) * B.unsqueeze(1)
-                k2 = delta_sq * AB.unsqueeze(-1) / 2.0
-                k3 = delta_cubed * A2B.unsqueeze(-1) / 6.0
-                k4 = (delta ** 4).unsqueeze(-1).unsqueeze(-1) * A3B.unsqueeze(-1) / 24.0
+                # Reshape B to (batch, 1, dstate, seqlen) for broadcasting with dim
+                B_expanded = B.unsqueeze(1)  # (batch, 1, dstate, seqlen)
+                # Expand to match dim dimension: (batch, dim, dstate, seqlen)
+                B_expanded = repeat(B_expanded, 'b 1 n l -> b d n l', d=dim)
                 
-                deltaB = k1 + k2 + k3 + k4
-                deltaB_u = torch.einsum('bdlnm,bdl->bdlnm', deltaB, u)
+                # Compute AB, A2B, A3B for variable B
+                # A is (dim, dstate), B_expanded is (batch, dim, dstate, seqlen)
+                AB = torch.einsum('dn,bdnl->bdln', A, B_expanded)  # (batch, dim, seqlen, dstate)
+                A2B = torch.einsum('dnm,bdml->bdln', A_squared, B_expanded)  # (batch, dim, seqlen, dstate)
+                A3B = torch.einsum('dnmk,bdkl->bdln', A_cubed, B_expanded)  # (batch, dim, seqlen, dstate)
+                
+                # RK4 coefficients: k1, k2, k3, k4
+                # delta is (batch, dim, seqlen)
+                k1 = delta.unsqueeze(-1) * B_expanded.permute(0, 1, 3, 2)  # (batch, dim, seqlen, dstate)
+                k2 = (delta ** 2).unsqueeze(-1) * AB / 2.0  # (batch, dim, seqlen, dstate)
+                k3 = (delta ** 3).unsqueeze(-1) * A2B / 6.0  # (batch, dim, seqlen, dstate)
+                k4 = (delta ** 4).unsqueeze(-1) * A3B / 24.0  # (batch, dim, seqlen, dstate)
+                
+                deltaB = k1 + k2 + k3 + k4  # (batch, dim, seqlen, dstate)
+                deltaB_u = deltaB * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
             else:
+                # B is (batch, n_groups, dstate, seqlen)
                 B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
-                # Simplified for brevity
-                deltaB_u = torch.einsum('bdl,bdnl,bdl->bdln', delta, B, u)
+                # B is now (batch, dim, dstate, seqlen)
+                B_expanded = B.permute(0, 1, 3, 2)  # (batch, dim, seqlen, dstate)
+                
+                # Compute AB, A2B, A3B
+                AB = torch.einsum('dn,bdnl->bdln', A, B)  # (batch, dim, seqlen, dstate)
+                A2B = torch.einsum('dnm,bdml->bdln', A_squared, B)  # (batch, dim, seqlen, dstate)
+                A3B = torch.einsum('dnmk,bdkl->bdln', A_cubed, B)  # (batch, dim, seqlen, dstate)
+                
+                # RK4 coefficients
+                k1 = delta.unsqueeze(-1) * B_expanded  # (batch, dim, seqlen, dstate)
+                k2 = (delta ** 2).unsqueeze(-1) * AB / 2.0  # (batch, dim, seqlen, dstate)
+                k3 = (delta ** 3).unsqueeze(-1) * A2B / 6.0  # (batch, dim, seqlen, dstate)
+                k4 = (delta ** 4).unsqueeze(-1) * A3B / 24.0  # (batch, dim, seqlen, dstate)
+                
+                deltaB = k1 + k2 + k3 + k4  # (batch, dim, seqlen, dstate)
+                deltaB_u = deltaB * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
     else:
         raise ValueError(f"Unknown discretization method: {discretization_method}")
     
