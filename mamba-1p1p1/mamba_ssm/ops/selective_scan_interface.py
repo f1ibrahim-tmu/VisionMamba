@@ -67,6 +67,8 @@ class SelectiveScanFn(torch.autograd.Function):
             ctx.squeeze_C = True
         
         # For the CUDA implementation, we only support ZOH for now
+        # Polynomial Interpolation requires bidirectional (non-causal) scan,
+        # which is only implemented in the Python reference. Force Python path.
         # When other methods are requested, fall back to the reference implementation
         if discretization_method != "zoh" and selective_scan_cuda is not None:
             result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
@@ -345,12 +347,16 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
     
     elif discretization_method == "poly":
-        # Polynomial Interpolation (Correct Formula):
+        # Polynomial Interpolation (Non-Causal, Bidirectional):
         # B̄ = A⁻¹(exp(AΔ)-I)B + ½A⁻²(exp(AΔ)-I-AΔ)B
         # Using Taylor expansion to avoid division:
         # ZOH term: A⁻¹(exp(AΔ)-I) = Δ + AΔ²/2 + A²Δ³/6 + A³Δ⁴/24
         # ½FOH term: ½A⁻²(exp(AΔ)-I-AΔ) = Δ²/4 + AΔ³/12 + A²Δ⁴/48
         # Combined: B̄ = (Δ + (A/2 + 1/4)Δ² + (A²/6 + A/12)Δ³ + (A³/24 + A²/48)Δ⁴) * B
+        # 
+        # NOTE: Polynomial Interpolation is NON-CAUSAL - it uses bidirectional scan
+        # to access both past and future information, creating smooth interpolation
+        # between points (like bicubic interpolation in image resizing)
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
         
         # Compute powers of delta
@@ -430,7 +436,7 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 deltaB_u = deltaB * u.unsqueeze(-1)
     
     elif discretization_method == "highorder":
-        # Higher-Order Hold (n=2, Quadratic) - Correct Generalized Formula:
+        # Higher-Order Hold (n=2, Quadratic) - CAUSAL Method:
         # B̄ = Σ(i=0 to n) A^(-(i+1)) * [exp(AΔ) - Σ(k=0 to i)(AΔ)^k/k!] / i! * B
         # For n=2: Combines ZOH (n=0) + FOH (n=1) + Quadratic (n=2) terms
         #
@@ -444,6 +450,11 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         # Δ² term: A/2 + 1/2
         # Δ³ term: A²/6 + A/6 + 1/12
         # Δ⁴ term: A³/24 + A²/24 + A/48
+        #
+        # NOTE: HOH is CAUSAL - delta (Δ) is applied at the INPUT/SAMPLING stage.
+        # It only uses past information to project forward, like "shooting in the dark"
+        # based on momentum from previous points. This can cause overshoot when the
+        # signal changes direction suddenly.
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
         
         # Compute powers of delta
@@ -578,6 +589,75 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     # Check if deltaA is a matrix (bilinear) or vector (other methods)
     is_matrix_deltaA = deltaA.dim() == 5  # (batch, dim, seqlen, dstate, dstate)
     
+    # Polynomial Interpolation uses bidirectional (non-causal) scan
+    if discretization_method == "poly":
+        # Forward pass: scan from left to right
+        x_f = A.new_zeros((batch, dim, dstate))
+        ys_f = []
+        for i in range(u.shape[2]):
+            if is_matrix_deltaA:
+                x_f = torch.matmul(deltaA[:, :, i], x_f.unsqueeze(-1)).squeeze(-1) + deltaB_u[:, :, i]
+            else:
+                x_f = deltaA[:, :, i] * x_f + deltaB_u[:, :, i]
+            if not is_variable_C:
+                y_f = torch.einsum('bdn,dn->bd', x_f, C)
+            else:
+                if C.dim() == 3:
+                    y_f = torch.einsum('bdn,bn->bd', x_f, C[:, :, i])
+                else:
+                    y_f = torch.einsum('bdn,bdn->bd', x_f, C[:, :, :, i])
+            if y_f.is_complex():
+                y_f = y_f.real * 2
+            ys_f.append(y_f)
+        
+        # Backward pass: scan from right to left (flip inputs)
+        x_b = A.new_zeros((batch, dim, dstate))
+        ys_b = []
+        deltaA_b = deltaA.flip([2])  # Flip along sequence dimension
+        deltaB_u_b = deltaB_u.flip([2])
+        u_b = u.flip([2])
+        # Handle variable C: flip along sequence dimension if it's variable
+        if is_variable_C:
+            if C.dim() == 3:
+                C_b = C.flip([2])  # (B, N, L) -> flip L
+            elif C.dim() == 4:
+                C_b = C.flip([3])  # (B, G, N, L) -> flip L
+            else:
+                C_b = C
+        else:
+            C_b = C
+        
+        for i in range(u_b.shape[2]):
+            if is_matrix_deltaA:
+                x_b = torch.matmul(deltaA_b[:, :, i], x_b.unsqueeze(-1)).squeeze(-1) + deltaB_u_b[:, :, i]
+            else:
+                x_b = deltaA_b[:, :, i] * x_b + deltaB_u_b[:, :, i]
+            if not is_variable_C:
+                y_b = torch.einsum('bdn,dn->bd', x_b, C_b)
+            else:
+                if C_b.dim() == 3:
+                    y_b = torch.einsum('bdn,bn->bd', x_b, C_b[:, :, i])
+                else:
+                    y_b = torch.einsum('bdn,bdn->bd', x_b, C_b[:, :, :, i])
+            if y_b.is_complex():
+                y_b = y_b.real * 2
+            ys_b.append(y_b)
+        
+        # Combine forward and backward passes (average for smooth interpolation)
+        y_f = torch.stack(ys_f, dim=2)  # (batch dim L)
+        y_b = torch.stack(ys_b, dim=2).flip([2])  # (batch dim L), flip back to original order
+        y = (y_f + y_b) / 2.0  # Average forward and backward for non-causal smooth interpolation
+        
+        last_state = x_f  # Use forward state as last state
+        
+        out = y if D is None else y + u * rearrange(D, "d -> d 1")
+        if z is not None:
+            out = out * F.silu(z)
+        out = out.to(dtype=dtype_in)
+        return out if not return_last_state else (out, last_state)
+    
+    # Causal scan for all other methods (including HOH)
+    ys = []  # Initialize output list for causal methods
     for i in range(u.shape[2]):
         if is_matrix_deltaA:
             # Bilinear: deltaA is a matrix, use matrix-vector multiplication
