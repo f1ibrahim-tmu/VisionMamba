@@ -2,23 +2,33 @@
 
 import torch
 import torch.nn.functional as F
-
-# Handle PyTorch version compatibility for custom_fwd/custom_bwd
-# torch.amp.custom_fwd/custom_bwd was introduced in PyTorch 2.4, older versions use torch.cuda.amp
+# Compatibility: custom_bwd/custom_fwd moved from torch.cuda.amp to torch.amp in PyTorch 2.1.0
 try:
     from torch.amp import custom_bwd, custom_fwd
-    # Successfully imported from torch.amp (PyTorch 2.4+)
-    def _custom_fwd(func):
-        return custom_fwd(device_type='cuda')(func)
-    def _custom_bwd(func):
-        return custom_bwd(device_type='cuda')(func)
+    _has_device_type_arg = True
 except ImportError:
-    # Fallback to torch.cuda.amp for older PyTorch versions
     from torch.cuda.amp import custom_bwd, custom_fwd
-    def _custom_fwd(func):
-        return custom_fwd(func)
-    def _custom_bwd(func):
-        return custom_bwd(func)
+    _has_device_type_arg = False
+
+# Compatibility wrappers for device_type argument (only supported in PyTorch 2.1.0+)
+# In older PyTorch, custom_fwd/custom_bwd are decorators themselves, not decorator factories
+if _has_device_type_arg:
+    # PyTorch >= 2.1.0: custom_fwd/custom_bwd are decorator factories that accept device_type
+    def _custom_fwd(*args, **kwargs):
+        return custom_fwd(*args, **kwargs)
+    
+    def _custom_bwd(*args, **kwargs):
+        return custom_bwd(*args, **kwargs)
+else:
+    # PyTorch < 2.1.0: custom_fwd/custom_bwd are decorators themselves
+    # We need to return them directly, ignoring any arguments
+    def _custom_fwd(*args, **kwargs):
+        # Ignore all arguments and return the decorator directly
+        return custom_fwd
+    
+    def _custom_bwd(*args, **kwargs):
+        # Ignore all arguments and return the decorator directly
+        return custom_bwd
 
 from einops import rearrange, repeat
 
@@ -36,7 +46,7 @@ class SelectiveScanFn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                return_last_state=False, discretization_method="zoh"):
+                return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
         if u.stride(-1) != 1:
             u = u.contiguous()
         if delta.stride(-1) != 1:
@@ -56,29 +66,74 @@ class SelectiveScanFn(torch.autograd.Function):
             C = rearrange(C, "b dstate l -> b 1 dstate l")
             ctx.squeeze_C = True
         
-        # For the CUDA implementation, we only support ZOH for now
-        # When other methods are requested, fall back to the reference implementation
-        if discretization_method != "zoh" and selective_scan_cuda is not None:
-            result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
-                                      return_last_state, discretization_method)
-            if not return_last_state:
-                return result
-            else:
-                out, last_state = result
-                return out, last_state
+        # Determine which implementation to use
+        # use_cuda_kernel: True = force CUDA, False = force Python, None = auto (try CUDA first)
+        force_cuda = use_cuda_kernel is True
+        force_python = use_cuda_kernel is False
+        auto_select = use_cuda_kernel is None
         
-        out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus)
+        # Polynomial Interpolation requires bidirectional (non-causal) scan,
+        # which is only implemented in the Python reference. Force Python path.
+        if discretization_method == "poly":
+            force_python = True
+            force_cuda = False
+            auto_select = False
+        
+        # Map discretization method string to enum value
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
+        
+        # Try CUDA kernel if requested (force or auto-select)
+        if (force_cuda or auto_select) and selective_scan_cuda is not None:
+            try:
+                out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum)
+                ctx.delta_softplus = delta_softplus
+                ctx.has_z = z is not None
+                ctx.discretization_method = discretization_method
+                ctx.use_cuda_kernel = True
+                last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
+                if not ctx.has_z:
+                    ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
+                    return out if not return_last_state else (out, last_state)
+                else:
+                    ctx.save_for_backward(u, delta, A, B, C, D, z, delta_bias, x, out)
+                    out_z = rest[0]
+                    return out_z if not return_last_state else (out_z, last_state)
+            except Exception as e:
+                # Fall back to reference implementation if CUDA kernel fails
+                if force_cuda:
+                    # If CUDA was forced but failed, raise the error
+                    raise RuntimeError(f"CUDA kernel failed for {discretization_method} (use_cuda_kernel=True): {e}")
+                # Otherwise, fall through to Python reference
+                if auto_select:
+                    # Only print warning in auto-select mode
+                    import warnings
+                    warnings.warn(f"CUDA kernel failed for {discretization_method}, falling back to Python reference: {e}", UserWarning)
+        
+        # Use Python reference implementation (either forced or as fallback)
+        result = selective_scan_ref(u, delta, A, B, C, D, z, delta_bias, delta_softplus, 
+                                  return_last_state, discretization_method)
         ctx.delta_softplus = delta_softplus
         ctx.has_z = z is not None
         ctx.discretization_method = discretization_method
-        last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
-        if not ctx.has_z:
-            ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
-            return out if not return_last_state else (out, last_state)
+        ctx.use_cuda_kernel = False
+        if not return_last_state:
+            return result
         else:
-            ctx.save_for_backward(u, delta, A, B, C, D, z, delta_bias, x, out)
-            out_z = rest[0]
-            return out_z if not return_last_state else (out_z, last_state)
+            out, last_state = result
+            return out, last_state
+        if not return_last_state:
+            return result
+        else:
+            out, last_state = result
+            return out, last_state
 
     @staticmethod
     def backward(ctx, dout, *args):
@@ -116,19 +171,25 @@ class SelectiveScanFn(torch.autograd.Function):
 
 
 def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                     return_last_state=False, discretization_method="zoh"):
+                     return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
     """if return_last_state is True, returns (out, last_state)
     last_state has shape (batch, dim, dstate). Note that the gradient of the last state is
     not considered in the backward pass.
     
-    discretization_method: str, one of ["zoh", "foh", "poly", "bilinear", "highorder"]
-        zoh: Zero Order Hold (default in original implementation)
-        foh: First Order Hold
-        poly: Polynomial interpolation
-        bilinear: Bilinear (Tustin) Transform
-        highorder: Higher-order hold
+    Args:
+        discretization_method: str, one of ["zoh", "foh", "poly", "bilinear", "highorder", "rk4"]
+            zoh: Zero Order Hold (default in original implementation)
+            foh: First Order Hold
+            poly: Polynomial interpolation
+            bilinear: Bilinear (Tustin) Transform
+            highorder: Higher-order hold
+            rk4: Runge-Kutta 4th order
+        use_cuda_kernel: bool or None
+            If True: Force use of CUDA kernel (if available)
+            If False: Force use of Python reference implementation
+            If None: Auto-select (try CUDA first, fallback to Python)
     """
-    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method)
+    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method, use_cuda_kernel)
 
 
 def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
@@ -201,8 +262,12 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         delta_5th = delta ** 5
         
         if not is_variable_B:
+            # B_d * u = (Δ²/2 * B + A*Δ³/6 * B + A²*Δ⁴/24 * B + A³*Δ⁵/120 * B) * u
+            # Compute coefficient: Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120 for each (b,d,l,n)
+            # Then multiply by B and u
+            
             # Expand delta powers to (B, D, L, 1) for broadcasting with A (D, N)
-            delta_sq_exp = delta_sq.unsqueeze(-1)
+            delta_sq_exp = delta_sq.unsqueeze(-1)  # (B, D, L, 1)
             delta_cubed_exp = delta_cubed.unsqueeze(-1)
             delta_4th_exp = delta_4th.unsqueeze(-1)
             delta_5th_exp = delta_5th.unsqueeze(-1)
@@ -218,29 +283,32 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
             deltaB = (delta_sq_exp / 2.0 * B_exp +
                       delta_cubed_exp / 6.0 * A_exp * B_exp +
                       delta_4th_exp / 24.0 * A_sq_exp * B_exp +
-                      delta_5th_exp / 120.0 * A_cubed_exp * B_exp)
+                      delta_5th_exp / 120.0 * A_cubed_exp * B_exp)  # (B, D, L, N)
             
-            deltaB_u = deltaB * u.unsqueeze(-1)
+            deltaB_u = deltaB * u.unsqueeze(-1)  # (B, D, L, N)
         else:
             if B.dim() == 3:
-                delta_sq_exp = delta_sq.unsqueeze(-1)
+                # B is (B, N, L)
+                delta_sq_exp = delta_sq.unsqueeze(-1)  # (B, D, L, 1)
                 delta_cubed_exp = delta_cubed.unsqueeze(-1)
                 delta_4th_exp = delta_4th.unsqueeze(-1)
                 delta_5th_exp = delta_5th.unsqueeze(-1)
                 
-                A_exp = A.unsqueeze(0).unsqueeze(2)
+                A_exp = A.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
                 A_sq = A ** 2
                 A_cubed = A ** 3
                 A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
                 A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
-                B_exp = B.unsqueeze(1).permute(0, 1, 3, 2)
+                
+                # B: (B, N, L) -> (B, 1, L, N) for broadcasting
+                B_exp = B.unsqueeze(1).permute(0, 1, 3, 2)  # (B, 1, L, N)
                 
                 deltaB = (delta_sq_exp / 2.0 * B_exp +
                           delta_cubed_exp / 6.0 * A_exp * B_exp +
                           delta_4th_exp / 24.0 * A_sq_exp * B_exp +
-                          delta_5th_exp / 120.0 * A_cubed_exp * B_exp)
+                          delta_5th_exp / 120.0 * A_cubed_exp * B_exp)  # (B, D, L, N)
                 
-                deltaB_u = deltaB * u.unsqueeze(-1)
+                deltaB_u = deltaB * u.unsqueeze(-1)  # (B, D, L, N)
             else:
                 B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
                 
@@ -254,7 +322,9 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 A_cubed = A ** 3
                 A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
                 A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
-                B_exp = B.permute(0, 1, 3, 2)
+                
+                # B: (B, D, N, L) -> (B, D, L, N) for proper broadcasting
+                B_exp = B.permute(0, 1, 3, 2)  # (B, D, L, N)
                 
                 deltaB = (delta_sq_exp / 2.0 * B_exp +
                           delta_cubed_exp / 6.0 * A_exp * B_exp +
@@ -563,8 +633,6 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 
                 # Compute AB, A2B, A3B for variable B
                 # A is (dim, dstate), B_expanded is (batch, dim, dstate, seqlen)
-                # AB = A @ B for each (b, d, l): (dim, dstate) @ (dstate, 1) -> (dim, 1)
-                # But we need (batch, dim, seqlen, dstate)
                 AB = torch.einsum('dn,bdnl->bdln', A, B_expanded)  # (batch, dim, seqlen, dstate)
                 A2B = torch.einsum('dnm,bdml->bdln', A_squared, B_expanded)  # (batch, dim, seqlen, dstate)
                 A3B = torch.einsum('dnmk,bdkl->bdln', A_cubed, B_expanded)  # (batch, dim, seqlen, dstate)
@@ -709,7 +777,7 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
 class MambaInnerFnNoOutProj(torch.autograd.Function):
 
     @staticmethod
-    @_custom_fwd
+    @_custom_fwd(device_type='cuda')
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
                 C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
@@ -778,7 +846,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
         return out_z
 
     @staticmethod
-    @_custom_bwd
+    @_custom_bwd(device_type='cuda')
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         (xz, conv1d_weight, conv1d_bias, x_dbl, x_proj_weight, delta_proj_weight, 
@@ -846,7 +914,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
 class MambaInnerFn(torch.autograd.Function):
 
     @staticmethod
-    @_custom_fwd
+    @_custom_fwd(device_type='cuda')
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
@@ -922,7 +990,7 @@ class MambaInnerFn(torch.autograd.Function):
         return F.linear(rearrange(out_z, "b d l -> b l d"), out_proj_weight, out_proj_bias)
 
     @staticmethod
-    @_custom_bwd
+    @_custom_bwd(device_type='cuda')
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         assert causal_conv1d_cuda is not None, "causal_conv1d_cuda is not available. Please install causal-conv1d."
@@ -997,7 +1065,7 @@ class MambaInnerFn(torch.autograd.Function):
 class BiMambaInnerFn(torch.autograd.Function):
 
     @staticmethod
-    @_custom_fwd
+    @_custom_fwd(device_type='cuda')
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
@@ -1077,7 +1145,7 @@ class BiMambaInnerFn(torch.autograd.Function):
         return F.linear(rearrange(out_z, "b d l -> b l d"), out_proj_weight, out_proj_bias)
 
     @staticmethod
-    @_custom_bwd
+    @_custom_bwd(device_type='cuda')
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         (xz, conv1d_weight, conv1d_bias, x_dbl, x_proj_weight, delta_proj_weight, out_proj_weight,
