@@ -85,12 +85,18 @@ __device__ __forceinline__ auto compute_discretization(
 
         case DISCRETIZATION_POLY:
         {
-            // POLY (Polynomial Interpolation): 
+            // POLY (Polynomial Interpolation) - NON-CAUSAL Method:
             // Correct formula: B̄ = A⁻¹(exp(AΔ)-I)B + ½A⁻²(exp(AΔ)-I-AΔ)B
             // Using Taylor expansion to avoid division:
             // A⁻¹(exp(AΔ)-I) = Δ + AΔ²/2 + A²Δ³/6 + ...
             // ½A⁻²(exp(AΔ)-I-AΔ) = ½(Δ²/2 + AΔ³/6 + A²Δ⁴/24 + ...) = Δ²/4 + AΔ³/12 + ...
             // Combined: B̄ = ΔB + (A/2 + 1/4)Δ²B + (A²/6 + A/12)Δ³B + ...
+            //
+            // NOTE: Polynomial Interpolation is NON-CAUSAL - it uses bidirectional scan
+            // to access both past and future information, creating smooth interpolation
+            // between points (like bicubic interpolation in image resizing).
+            // The bidirectional scan is handled in the Python reference implementation.
+            // This CUDA kernel computes the discretization coefficients only.
             constexpr float kLog2e = M_LOG2E;
             float A_val_scaled = A_val * kLog2e;
             A_d = exp2f(delta_val * A_val_scaled);
@@ -140,7 +146,7 @@ __device__ __forceinline__ auto compute_discretization(
 
         case DISCRETIZATION_HIGHORDER:
         {
-            // HIGHER-ORDER HOLD (n=2, Quadratic)
+            // HIGHER-ORDER HOLD (n=2, Quadratic) - CAUSAL Method
             // Generalized formula: B̄ = Σ(i=0 to n) A^(-(i+1)) * [exp(AΔ) - Σ(k=0 to i)(AΔ)^k/k!] / i! * B
             // For n=2: B̄ = ZOH_B + FOH_B + (1/2!)×[A⁻³(exp(AΔ) - I - AΔ - (AΔ)²/2)]B
             // 
@@ -151,6 +157,11 @@ __device__ __forceinline__ auto compute_discretization(
             //
             // Combined (n=2): Δ + (A/2)Δ² + (A²/6 + 1/2)Δ² + (A²/6 + A/12)Δ³ + (Δ³/12)
             //               = Δ + (A/2 + 1/2)Δ² + (A²/6 + A/6 + 1/12)Δ³ + ...
+            //
+            // NOTE: HOH is CAUSAL - delta (Δ) is applied at the INPUT/SAMPLING stage.
+            // It only uses past information to project forward, like "shooting in the dark"
+            // based on momentum from previous points. This can cause overshoot when the
+            // signal changes direction suddenly.
             
             constexpr float kLog2e = M_LOG2E;
             float A_val_scaled = A_val * kLog2e;
