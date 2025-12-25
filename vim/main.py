@@ -8,8 +8,12 @@ import torch
 import torch.backends.cudnn as cudnn
 import json
 import os
+import warnings
 
 from pathlib import Path
+
+# Suppress warnings from dependencies
+warnings.filterwarnings("ignore", message=".*Field.*has conflict with protected namespace.*", category=UserWarning)
 
 from timm.data import Mixup
 from timm.models import create_model

@@ -7,10 +7,10 @@ from torch import Tensor
 from typing import Optional
 
 from timm.models.vision_transformer import VisionTransformer, _cfg
-from timm.models.registry import register_model
-from timm.models.layers import trunc_normal_, lecun_normal_
+from timm.models import register_model
+from timm.layers import trunc_normal_, lecun_normal_
 
-from timm.models.layers import DropPath, to_2tuple
+from timm.layers import DropPath, to_2tuple
 from timm.models.vision_transformer import _load_weights
 
 import math
