@@ -11,7 +11,44 @@ import warnings
 
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import custom_fwd, custom_bwd
+# Backward compatibility: custom_fwd and custom_bwd moved from torch.cuda.amp to torch.amp in PyTorch 2.0+
+try:
+    from torch.amp import custom_fwd as _custom_fwd, custom_bwd as _custom_bwd
+    _HAS_DEVICE_TYPE_ARG = True
+except ImportError:
+    from torch.cuda.amp import custom_fwd as _custom_fwd, custom_bwd as _custom_bwd
+    _HAS_DEVICE_TYPE_ARG = False
+
+# Compatibility wrappers: device_type argument only supported in PyTorch 2.0+
+# In older PyTorch, custom_fwd/custom_bwd are direct decorators (no arguments)
+# In newer PyTorch, they are decorator factories that accept device_type
+def custom_fwd(*args, **kwargs):
+    if not _HAS_DEVICE_TYPE_ARG:
+        # For older PyTorch: if device_type is provided, ignore it
+        # Return the decorator directly (it's already a decorator function)
+        if 'device_type' in kwargs:
+            kwargs.pop('device_type')
+        # If no remaining args/kwargs, return the decorator
+        if not args and not kwargs:
+            return _custom_fwd
+        # Otherwise pass through (shouldn't happen in practice)
+        return _custom_fwd(*args, **kwargs)
+    # New PyTorch: pass through normally
+    return _custom_fwd(*args, **kwargs)
+
+def custom_bwd(*args, **kwargs):
+    if not _HAS_DEVICE_TYPE_ARG:
+        # For older PyTorch: if device_type is provided, ignore it
+        # Return the decorator directly (it's already a decorator function)
+        if 'device_type' in kwargs:
+            kwargs.pop('device_type')
+        # If no remaining args/kwargs, return the decorator
+        if not args and not kwargs:
+            return _custom_bwd
+        # Otherwise pass through (shouldn't happen in practice)
+        return _custom_bwd(*args, **kwargs)
+    # New PyTorch: pass through normally
+    return _custom_bwd(*args, **kwargs)
 
 import triton
 import triton.language as tl
@@ -982,7 +1019,7 @@ class RMSNorm(torch.nn.Module):
 
 class LayerNormLinearFn(torch.autograd.Function):
     @staticmethod
-    @custom_fwd
+    @custom_fwd(device_type='cuda')
     def forward(
         ctx,
         x,
@@ -1041,7 +1078,7 @@ class LayerNormLinearFn(torch.autograd.Function):
         return out if not prenorm else (out, residual_out.reshape(x_shape_og))
 
     @staticmethod
-    @custom_bwd
+    @custom_bwd(device_type='cuda')
     def backward(ctx, dout, *args):
         x, norm_weight, norm_bias, linear_weight, mean, rstd = ctx.saved_tensors
         dout = dout.reshape(-1, dout.shape[-1])
