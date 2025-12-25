@@ -11,7 +11,11 @@ import warnings
 
 import torch
 import torch.nn.functional as F
-from torch.amp import custom_fwd, custom_bwd
+# Backward compatibility: custom_fwd and custom_bwd moved from torch.cuda.amp to torch.amp in PyTorch 2.0+
+try:
+    from torch.amp import custom_fwd, custom_bwd
+except ImportError:
+    from torch.cuda.amp import custom_fwd, custom_bwd
 
 import triton
 import triton.language as tl
