@@ -20,34 +20,16 @@ except ImportError:
     _HAS_DEVICE_TYPE_ARG = False
 
 # Compatibility wrappers: device_type argument only supported in PyTorch 2.0+
-# In older PyTorch, custom_fwd/custom_bwd are direct decorators (no arguments)
-# In newer PyTorch, they are decorator factories that accept device_type
 def custom_fwd(*args, **kwargs):
     if not _HAS_DEVICE_TYPE_ARG:
-        # For older PyTorch: if device_type is provided, ignore it
-        # Return the decorator directly (it's already a decorator function)
-        if 'device_type' in kwargs:
-            kwargs.pop('device_type')
-        # If no remaining args/kwargs, return the decorator
-        if not args and not kwargs:
-            return _custom_fwd
-        # Otherwise pass through (shouldn't happen in practice)
-        return _custom_fwd(*args, **kwargs)
-    # New PyTorch: pass through normally
+        # Remove device_type for older PyTorch versions
+        kwargs.pop('device_type', None)
     return _custom_fwd(*args, **kwargs)
 
 def custom_bwd(*args, **kwargs):
     if not _HAS_DEVICE_TYPE_ARG:
-        # For older PyTorch: if device_type is provided, ignore it
-        # Return the decorator directly (it's already a decorator function)
-        if 'device_type' in kwargs:
-            kwargs.pop('device_type')
-        # If no remaining args/kwargs, return the decorator
-        if not args and not kwargs:
-            return _custom_bwd
-        # Otherwise pass through (shouldn't happen in practice)
-        return _custom_bwd(*args, **kwargs)
-    # New PyTorch: pass through normally
+        # Remove device_type for older PyTorch versions
+        kwargs.pop('device_type', None)
     return _custom_bwd(*args, **kwargs)
 
 import triton
