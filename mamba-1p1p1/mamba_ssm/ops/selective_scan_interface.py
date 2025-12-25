@@ -832,8 +832,11 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
+        # Default to zoh (0) for MambaInnerFnNoOutProj
+        disc_method_enum = 0
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
+            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
         ctx.delta_softplus = delta_softplus
         ctx.checkpoint_lvl = checkpoint_lvl
@@ -976,8 +979,11 @@ class MambaInnerFn(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
+        # Default to zoh (0) for MambaInnerFn
+        disc_method_enum = 0
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
+            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
         ctx.delta_softplus = delta_softplus
         ctx.out_proj_bias_is_None = out_proj_bias is None
@@ -1124,12 +1130,15 @@ class BiMambaInnerFn(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
+        # Default to zoh (0) for BiMambaInnerFn
+        disc_method_enum = 0
         out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
+            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
         assert not A_b.is_complex(), "A should not be complex!!"
         out_b, scan_intermediates_b, out_z_b = selective_scan_cuda.fwd(
-            conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, delta_softplus,
+            conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, delta_softplus, disc_method_enum
         )
 
         out_z = out_z_f + out_z_b.flip([-1])
