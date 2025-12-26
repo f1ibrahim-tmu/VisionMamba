@@ -41,16 +41,19 @@ model = dict(
     test_cfg = dict(mode='slide', crop_size=crop_size, stride=(341, 341))
 )
 
-optimizer = dict(_delete_=True, 
-                 type='AdamW', 
-                 lr=1e-4, 
-                 betas=(0.9, 0.999), 
-                 weight_decay=0.05,
-                 constructor='LayerDecayOptimizerConstructor', 
-                 paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
-                )
-
-optim_wrapper = dict(_delete_=True, type='OptimWrapper', optimizer=optimizer)
+# MMSeg 1.x format: constructor and paramwise_cfg go in optim_wrapper
+optim_wrapper = dict(
+    _delete_=True,
+    type='OptimWrapper',
+    optimizer=dict(
+        type='AdamW',
+        lr=1e-4,
+        betas=(0.9, 0.999),
+        weight_decay=0.05
+    ),
+    constructor='VimLayerDecayOptimizerConstructor',
+    paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
+)
 
 param_scheduler = [
     dict(
