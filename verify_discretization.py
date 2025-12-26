@@ -10,8 +10,37 @@ import sys
 import os
 from collections import OrderedDict
 
-# Add the mamba path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'mamba-1p1p1'))
+# Add the mamba path - configurable via environment variable
+def get_mamba_path():
+    """Get the mamba-ssm path, checking environment variable first, then auto-detecting."""
+    # 1. Check environment variable (highest priority)
+    env_path = os.environ.get('MAMBA_SSM_PATH')
+    if env_path and os.path.isdir(env_path):
+        return env_path
+    
+    # 2. Auto-detect common folder names in the project root
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = script_dir
+    common_names = [
+        'mamba-1p1p1',
+        'mamba-1p1p1-cvis-a100',
+        'mamba-1p1p1-rorqual-h100',
+        'mamba-1p1p1-fir-h100'
+    ]
+    
+    for name in common_names:
+        candidate = os.path.join(project_root, name)
+        if os.path.isdir(candidate):
+            return candidate
+    
+    # 3. Fallback to default (for backward compatibility)
+    default_path = os.path.join(project_root, 'mamba-1p1p1')
+    return default_path
+
+mamba_path = get_mamba_path()
+if mamba_path not in sys.path:
+    sys.path.insert(0, mamba_path)
+print(f"Using mamba-ssm path: {mamba_path}")
 
 try:
     from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
@@ -291,7 +320,7 @@ if __name__ == "__main__":
         
         if result['identical_pairs']:
             print("\n1. CRITICAL: Rebuild the CUDA extension:")
-            print("   cd mamba-1p1p1")
+            print(f"   cd {mamba_path}")
             print("   pip install -e . --force-reinstall --no-cache-dir")
             print("\n2. Check that discretization_kernels.cuh is being included")
             print("\n3. Verify the enum values match between Python and C++:")
