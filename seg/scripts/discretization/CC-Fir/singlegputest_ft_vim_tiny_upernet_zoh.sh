@@ -19,7 +19,7 @@ fi
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 \
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 --master_port 0 \
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
