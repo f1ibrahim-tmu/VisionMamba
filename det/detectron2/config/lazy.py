@@ -387,8 +387,13 @@ class LazyConfig:
             for o in overrides:
                 key, value = o.split("=")
                 try:
-                    value = eval(value, {})
-                except NameError:
+                    # Handle empty strings explicitly (both quoted and unquoted)
+                    if value == "" or value == '""' or value == "''":
+                        value = ""
+                    else:
+                        value = eval(value, {})
+                except (NameError, SyntaxError):
+                    # If eval fails, keep the original string value
                     pass
                 safe_update(cfg, key, value)
         return cfg
