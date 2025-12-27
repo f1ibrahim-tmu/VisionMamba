@@ -11,7 +11,7 @@ SEED=${1:-0}
 # Change to project root to ensure relative paths work
 cd "$PROJECT_ROOT"
 
-CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --master_port 0 \
+CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
     ./main.py \
     --model vim_tiny_patch16_224_bimambav2_highorder \
     --batch-size 512 \
