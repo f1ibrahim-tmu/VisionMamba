@@ -3,7 +3,7 @@
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port 0 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_foh \
     --batch-size 256 \
