@@ -17,9 +17,21 @@ else
     echo "No checkpoint found at ${CHECKPOINT_PATH}, starting training from scratch."
 fi
 
+# Generate unique port based on SLURM job ID (if available) or use process ID
+# Port range: 29500-29999 (500 ports available)
+if [ -n "$SLURM_JOB_ID" ]; then
+    MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
+else
+    # Fallback: use process ID if not in SLURM environment
+    MASTER_PORT=$((29500 + $$ % 500))
+fi
+export MASTER_PORT
+
+echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
+
 # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 \
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 --master_port $MASTER_PORT \
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
