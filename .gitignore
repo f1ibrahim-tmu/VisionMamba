@@ -17,4 +17,5 @@ causal-conv1d/
 documentation/
 backup-setup-guide/
 work_dirs/
+output/
 __pycache__/
