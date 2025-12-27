@@ -8,7 +8,7 @@ PRETRAIN_CKPT=home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/ou
 CHECKPOINT_PATH=output/segmentation_logs/vim_tiny_vimseg_upernet_zoh/checkpoint.pth
 RESUME_ARG=""
 if [ -f "${CHECKPOINT_PATH}" ]; then
-    RESUME_ARG="--resume ${CHECKPOINT_PATH}"
+    RESUME_ARG="--resume-from ${CHECKPOINT_PATH}"
     echo "Found checkpoint at ${CHECKPOINT_PATH}, will resume training from it."
 else
     echo "No checkpoint found at ${CHECKPOINT_PATH}, starting training from scratch."
