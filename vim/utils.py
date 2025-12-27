@@ -240,6 +240,28 @@ def init_distributed_mode(args):
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = 'nccl'
+    
+    # Handle dist_url - if using env://, check if MASTER_PORT is valid
+    if args.dist_url == 'env://':
+        master_port = os.environ.get('MASTER_PORT', None)
+        # If MASTER_PORT is 0 or not set, use file-based init instead
+        # This happens when torch.distributed.run uses --master_port 0
+        if master_port is None or master_port == '0' or int(master_port) == 0:
+            # Use file-based init with a shared location
+            import tempfile
+            # Use a shared temp directory accessible to all processes
+            tmp_dir = os.environ.get('TMPDIR', tempfile.gettempdir())
+            # Use job ID or run ID to create unique file per job
+            job_id = os.environ.get('SLURM_JOB_ID', os.environ.get('TORCHELASTIC_RUN_ID', str(os.getpid())))
+            init_file = os.path.join(tmp_dir, f"torch_dist_init_{job_id}.json")
+            args.dist_url = f"file://{init_file}"
+            print(f'| WARNING: MASTER_PORT is 0 or not set, using file-based init: {args.dist_url}', flush=True)
+        else:
+            # Construct proper tcp URL from environment variables
+            master_addr = os.environ.get('MASTER_ADDR', '127.0.0.1')
+            args.dist_url = f"tcp://{master_addr}:{master_port}"
+            print(f'| Using environment variables: MASTER_ADDR={master_addr}, MASTER_PORT={master_port}', flush=True)
+    
     print('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url), flush=True)
     torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
