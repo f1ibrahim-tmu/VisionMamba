@@ -23,6 +23,16 @@ struct SSMScanParamsBase {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Discretization method enum
+enum DiscretizationMethod {
+    DISCRETIZATION_ZOH = 0,
+    DISCRETIZATION_FOH = 1,
+    DISCRETIZATION_BILINEAR = 2,
+    DISCRETIZATION_POLY = 3,
+    DISCRETIZATION_HIGHORDER = 4,
+    DISCRETIZATION_RK4 = 5
+};
+
 struct SSMParamsBase {
     using index_t = uint32_t;
 
@@ -32,6 +42,7 @@ struct SSMParamsBase {
     bool is_variable_C;
 
     bool delta_softplus;
+    DiscretizationMethod discretization_method;
 
     index_t A_d_stride;
     index_t A_dstate_stride;

@@ -79,7 +79,8 @@ void set_ssm_params_fwd(SSMParamsBase &params,
                         void* delta_bias_ptr,
                         void* x_ptr,
                         bool has_z,
-                        bool delta_softplus) {
+                        bool delta_softplus,
+                        DiscretizationMethod discretization_method = DISCRETIZATION_ZOH) {
 
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -93,6 +94,7 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     params.dim_ngroups_ratio = dim / n_groups;
 
     params.delta_softplus = delta_softplus;
+    params.discretization_method = discretization_method;
 
     params.is_variable_B = is_variable_B;
     params.is_variable_C = is_variable_C;
@@ -229,7 +231,8 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &D_,
                   const c10::optional<at::Tensor> &z_,
                   const c10::optional<at::Tensor> &delta_bias_,
-                  bool delta_softplus) {
+                  bool delta_softplus,
+                  int discretization_method = 0) {
     auto input_type = u.scalar_type();
     auto weight_type = A.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);
@@ -313,13 +316,15 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
     x = torch::empty({batch_size, dim, n_chunks, dstate * 2}, u.options().dtype(weight_type));
 
     SSMParamsBase params;
+    DiscretizationMethod disc_method = static_cast<DiscretizationMethod>(discretization_method);
     set_ssm_params_fwd(params, batch_size, dim, seqlen, dstate, n_groups, n_chunks, is_variable_B, is_variable_C,
                        u, delta, A, B, C, out, z, out_z,
                        D_.has_value() ? D_.value().data_ptr() : nullptr,
                        delta_bias_.has_value() ? delta_bias_.value().data_ptr() : nullptr,
                        x.data_ptr(),
                        has_z,
-                       delta_softplus);
+                       delta_softplus,
+                       disc_method);
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
