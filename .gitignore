@@ -17,4 +17,5 @@ causal-conv1d/
 visualizations/interactive-logger/node_modules/
 visualizations/interactive-logger/public/  
 work_dirs/
+output/
 __pycache__/
