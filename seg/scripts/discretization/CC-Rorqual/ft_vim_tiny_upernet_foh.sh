@@ -8,11 +8,10 @@ PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionM
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --master_port 0 \
     seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
-    --seed 0 --work-dir work_dirs/vimseg-t-foh --deterministic \
+    --seed 0 --work-dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_foh --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=foh \
              optimizer.lr=0.001 \
-             optimizer.weight_decay=0.05 \
-    --output_dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_foh
+             optimizer.weight_decay=0.05
