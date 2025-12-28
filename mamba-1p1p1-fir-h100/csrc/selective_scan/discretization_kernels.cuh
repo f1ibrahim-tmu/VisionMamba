@@ -315,11 +315,17 @@ __device__ __forceinline__ auto compute_discretization(
             complex_t coeff_delta4 = A_cubed * complex_t(1.0f/24.0f, 0.0f) + A_sq * complex_t(1.0f/48.0f, 0.0f);
             
             // delta_u_val is complex, extract u by dividing by delta
-            complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-            B_d_u_complex = delta_u_val +
-                            coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
-                            coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
-                            coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
+            // Guard against division by zero
+            if (fabsf(delta_val) > 1e-8f) {
+                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
+                B_d_u_complex = delta_u_val +
+                                coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
+                                coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
+                                coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
+            } else {
+                // As delta -> 0, higher-order terms vanish, keep only first-order term
+                B_d_u_complex = delta_u_val;
+            }
             break;
         }
         
@@ -342,11 +348,17 @@ __device__ __forceinline__ auto compute_discretization(
             complex_t coeff_delta4 = A_cubed * complex_t(1.0f/24.0f, 0.0f) + A_sq * complex_t(1.0f/24.0f, 0.0f) + A_val * complex_t(1.0f/48.0f, 0.0f);
             
             // delta_u_val is complex, extract u by dividing by delta
-            complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-            B_d_u_complex = delta_u_val +
-                            coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
-                            coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
-                            coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
+            // Guard against division by zero
+            if (fabsf(delta_val) > 1e-8f) {
+                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
+                B_d_u_complex = delta_u_val +
+                                coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
+                                coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
+                                coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
+            } else {
+                // As delta -> 0, higher-order terms vanish, keep only first-order term
+                B_d_u_complex = delta_u_val;
+            }
             break;
         }
         
@@ -391,11 +403,17 @@ __device__ __forceinline__ auto compute_discretization(
             complex_t A_cubed = A_sq * A_val;
             
             // delta_u_val is complex, extract u by dividing by delta
-            complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-            B_d_u_complex = delta_u_val +
-                            A_val * complex_t(delta_sq / 2.0f, 0.0f) * u_factor +
-                            A_sq * complex_t(delta_cubed / 6.0f, 0.0f) * u_factor +
-                            A_cubed * complex_t(delta_4th / 24.0f, 0.0f) * u_factor;
+            // Guard against division by zero
+            if (fabsf(delta_val) > 1e-8f) {
+                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
+                B_d_u_complex = delta_u_val +
+                                A_val * complex_t(delta_sq / 2.0f, 0.0f) * u_factor +
+                                A_sq * complex_t(delta_cubed / 6.0f, 0.0f) * u_factor +
+                                A_cubed * complex_t(delta_4th / 24.0f, 0.0f) * u_factor;
+            } else {
+                // As delta -> 0, higher-order terms vanish, keep only first-order term
+                B_d_u_complex = delta_u_val;
+            }
             break;
         }
         }

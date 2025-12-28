@@ -10,12 +10,11 @@
 
 // Helper function to compute A_d and B_d for different discretization methods
 // Returns (A_d, B_d * u) as float2 for real or float4 for complex
-// delta_u_val_t is float for real case, complex_t for complex case
-template <typename weight_t, bool kIsComplex, typename delta_u_val_t = std::conditional_t<!kIsComplex, float, weight_t>>
+template <typename weight_t, bool kIsComplex>
 __device__ __forceinline__ auto compute_discretization(
     float delta_val,
     weight_t A_val,
-    delta_u_val_t delta_u_val,
+    float delta_u_val,
     weight_t B_val,
     DiscretizationMethod method)
 {
@@ -73,15 +72,9 @@ __device__ __forceinline__ auto compute_discretization(
                           A_cubed * delta_5th / 120.0f;
             
             // Handle edge case when delta is very small
-            // As delta -> 0, coeff -> 0, so B_d_u -> 0
-            // Use safe computation to avoid division by zero
             if (fabsf(delta_val) < 1e-8f) {
-                // Limit as delta -> 0: B_d_u -> 0
-                // Use first-order approximation: B_d_u ≈ (delta²/2) * u
-                // Since delta_u_val = delta * u, we have: B_d_u ≈ (delta²/2) * (delta_u_val / delta)
-                // But to avoid division, use: B_d_u ≈ delta * delta_u_val / 2
-                // However, when delta is very small, this should be approximately 0
-                B_d_u = 0.0f;  // Safe: FOH term vanishes as delta -> 0
+                // Limit as delta -> 0: coeff -> 0, so use first-order term
+                B_d_u = delta_sq / 2.0f * delta_u_val / delta_val;
             } else {
                 // B_d_u = coeff * u (where u is extracted from delta_u_val)
                 B_d_u = coeff * delta_u_val / delta_val;
@@ -91,18 +84,12 @@ __device__ __forceinline__ auto compute_discretization(
 
         case DISCRETIZATION_POLY:
         {
-            // POLY (Polynomial Interpolation) - NON-CAUSAL Method:
+            // POLY (Polynomial Interpolation): 
             // Correct formula: B̄ = A⁻¹(exp(AΔ)-I)B + ½A⁻²(exp(AΔ)-I-AΔ)B
             // Using Taylor expansion to avoid division:
             // A⁻¹(exp(AΔ)-I) = Δ + AΔ²/2 + A²Δ³/6 + ...
             // ½A⁻²(exp(AΔ)-I-AΔ) = ½(Δ²/2 + AΔ³/6 + A²Δ⁴/24 + ...) = Δ²/4 + AΔ³/12 + ...
             // Combined: B̄ = ΔB + (A/2 + 1/4)Δ²B + (A²/6 + A/12)Δ³B + ...
-            //
-            // NOTE: Polynomial Interpolation is NON-CAUSAL - it uses bidirectional scan
-            // to access both past and future information, creating smooth interpolation
-            // between points (like bicubic interpolation in image resizing).
-            // The bidirectional scan is handled in the Python reference implementation.
-            // This CUDA kernel computes the discretization coefficients only.
             constexpr float kLog2e = M_LOG2E;
             float A_val_scaled = A_val * kLog2e;
             A_d = exp2f(delta_val * A_val_scaled);
@@ -133,26 +120,25 @@ __device__ __forceinline__ auto compute_discretization(
             float coeff_delta3 = A_sq / 6.0f + A_val / 12.0f;  // coefficient for Δ³ term
             float coeff_delta4 = A_cubed / 24.0f + A_sq / 48.0f;  // coefficient for Δ⁴ term
             
-            B_d_u = delta_u_val +
-                    delta_sq * B_val * coeff_delta2 * (delta_u_val / delta_val / B_val) +
-                    delta_cubed * B_val * coeff_delta3 * (delta_u_val / delta_val / B_val) +
-                    delta_4th * B_val * coeff_delta4 * (delta_u_val / delta_val / B_val);
-            
             // Simplified: extract u = delta_u_val / delta_val (for non-variable B case)
             // For variable B case, delta_u_val = B * delta * u, so delta_u_val / delta_val = B * u
+            // Guard against division by zero
             if (fabsf(delta_val) > 1e-8f) {
                 float u_factor = delta_u_val / delta_val;  // This is either 'u' or 'B*u'
                 B_d_u = delta_u_val +  // Δ * (B * u) or Δ * u
                         delta_sq * coeff_delta2 * u_factor +
                         delta_cubed * coeff_delta3 * u_factor +
                         delta_4th * coeff_delta4 * u_factor;
+            } else {
+                // As delta -> 0, higher-order terms vanish, keep only first-order term
+                B_d_u = delta_u_val;
             }
             break;
         }
 
         case DISCRETIZATION_HIGHORDER:
         {
-            // HIGHER-ORDER HOLD (n=2, Quadratic) - CAUSAL Method
+            // HIGHER-ORDER HOLD (n=2, Quadratic)
             // Generalized formula: B̄ = Σ(i=0 to n) A^(-(i+1)) * [exp(AΔ) - Σ(k=0 to i)(AΔ)^k/k!] / i! * B
             // For n=2: B̄ = ZOH_B + FOH_B + (1/2!)×[A⁻³(exp(AΔ) - I - AΔ - (AΔ)²/2)]B
             // 
@@ -163,11 +149,6 @@ __device__ __forceinline__ auto compute_discretization(
             //
             // Combined (n=2): Δ + (A/2)Δ² + (A²/6 + 1/2)Δ² + (A²/6 + A/12)Δ³ + (Δ³/12)
             //               = Δ + (A/2 + 1/2)Δ² + (A²/6 + A/6 + 1/12)Δ³ + ...
-            //
-            // NOTE: HOH is CAUSAL - delta (Δ) is applied at the INPUT/SAMPLING stage.
-            // It only uses past information to project forward, like "shooting in the dark"
-            // based on momentum from previous points. This can cause overshoot when the
-            // signal changes direction suddenly.
             
             constexpr float kLog2e = M_LOG2E;
             float A_val_scaled = A_val * kLog2e;
@@ -265,8 +246,7 @@ __device__ __forceinline__ auto compute_discretization(
         {
             constexpr float kLog2e = M_LOG2E;
             A_d = cexp2f(complex_t(delta_val * A_val.real_ * kLog2e, delta_val * A_val.imag_ * kLog2e));
-            // delta_u_val is now complex_t (B * delta * u for variable B, or delta * u for constant B)
-            B_d_u_complex = delta_u_val * B_val;
+            B_d_u_complex = complex_t(delta_u_val, 0.0f) * B_val;
             break;
         }
 
@@ -295,15 +275,7 @@ __device__ __forceinline__ auto compute_discretization(
                               A_cubed * complex_t(delta_5th / 120.0f, 0.0f);
             
             // B_d_u = coeff * u (B handled at output)
-            // delta_u_val is complex, extract u by dividing by delta
-            // Handle edge case when delta is very small to avoid division by zero
-            if (fabsf(delta_val) < 1e-8f) {
-                // Limit as delta -> 0: B_d_u -> 0
-                B_d_u_complex = complex_t(0.0f, 0.0f);  // Safe: FOH term vanishes as delta -> 0
-            } else {
-                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-                B_d_u_complex = coeff * u_factor;
-            }
+            B_d_u_complex = coeff * complex_t(delta_u_val / delta_val, 0.0f);
             break;
         }
 
@@ -326,18 +298,11 @@ __device__ __forceinline__ auto compute_discretization(
             complex_t coeff_delta3 = A_sq * complex_t(1.0f/6.0f, 0.0f) + A_val * complex_t(1.0f/12.0f, 0.0f);
             complex_t coeff_delta4 = A_cubed * complex_t(1.0f/24.0f, 0.0f) + A_sq * complex_t(1.0f/48.0f, 0.0f);
             
-            // delta_u_val is complex, extract u by dividing by delta
-            // Guard against division by zero
-            if (fabsf(delta_val) > 1e-8f) {
-                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-                B_d_u_complex = delta_u_val +
-                                coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
-                                coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
-                                coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
-            } else {
-                // As delta -> 0, higher-order terms vanish, keep only first-order term
-                B_d_u_complex = delta_u_val;
-            }
+            complex_t u_factor = complex_t(delta_u_val / delta_val, 0.0f);
+            B_d_u_complex = complex_t(delta_u_val, 0.0f) +
+                            coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
+                            coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
+                            coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
             break;
         }
         
@@ -359,18 +324,11 @@ __device__ __forceinline__ auto compute_discretization(
             complex_t coeff_delta3 = A_sq * complex_t(1.0f/6.0f, 0.0f) + A_val * complex_t(1.0f/6.0f, 0.0f) + complex_t(1.0f/12.0f, 0.0f);
             complex_t coeff_delta4 = A_cubed * complex_t(1.0f/24.0f, 0.0f) + A_sq * complex_t(1.0f/24.0f, 0.0f) + A_val * complex_t(1.0f/48.0f, 0.0f);
             
-            // delta_u_val is complex, extract u by dividing by delta
-            // Guard against division by zero
-            if (fabsf(delta_val) > 1e-8f) {
-                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-                B_d_u_complex = delta_u_val +
-                                coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
-                                coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
-                                coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
-            } else {
-                // As delta -> 0, higher-order terms vanish, keep only first-order term
-                B_d_u_complex = delta_u_val;
-            }
+            complex_t u_factor = complex_t(delta_u_val / delta_val, 0.0f);
+            B_d_u_complex = complex_t(delta_u_val, 0.0f) +
+                            coeff_delta2 * complex_t(delta_sq, 0.0f) * u_factor +
+                            coeff_delta3 * complex_t(delta_cubed, 0.0f) * u_factor +
+                            coeff_delta4 * complex_t(delta_4th, 0.0f) * u_factor;
             break;
         }
         
@@ -388,13 +346,12 @@ __device__ __forceinline__ auto compute_discretization(
             if (denom_mag_sq > 1e-16f) {
                 complex_t denom_inv = complex_t(denom.real_ / denom_mag_sq, -denom.imag_ / denom_mag_sq);
                 A_d = numer * denom_inv;
-                // delta_u_val is complex
-                B_d_u_complex = delta_u_val * denom_inv;
+                B_d_u_complex = complex_t(delta_u_val, 0.0f) * denom_inv;
             } else {
                 // Fall back to ZOH
                 constexpr float kLog2e = M_LOG2E;
                 A_d = cexp2f(complex_t(delta_val * A_val.real_ * kLog2e, delta_val * A_val.imag_ * kLog2e));
-                B_d_u_complex = delta_u_val * B_val;
+                B_d_u_complex = complex_t(delta_u_val, 0.0f) * B_val;
             }
             break;
         }
@@ -414,18 +371,11 @@ __device__ __forceinline__ auto compute_discretization(
             complex_t A_sq = A_val * A_val;
             complex_t A_cubed = A_sq * A_val;
             
-            // delta_u_val is complex, extract u by dividing by delta
-            // Guard against division by zero
-            if (fabsf(delta_val) > 1e-8f) {
-                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-                B_d_u_complex = delta_u_val +
-                                A_val * complex_t(delta_sq / 2.0f, 0.0f) * u_factor +
-                                A_sq * complex_t(delta_cubed / 6.0f, 0.0f) * u_factor +
-                                A_cubed * complex_t(delta_4th / 24.0f, 0.0f) * u_factor;
-            } else {
-                // As delta -> 0, higher-order terms vanish, keep only first-order term
-                B_d_u_complex = delta_u_val;
-            }
+            complex_t u_factor = complex_t(delta_u_val / delta_val, 0.0f);
+            B_d_u_complex = complex_t(delta_u_val, 0.0f) +
+                            A_val * complex_t(delta_sq / 2.0f, 0.0f) * u_factor +
+                            A_sq * complex_t(delta_cubed / 6.0f, 0.0f) * u_factor +
+                            A_cubed * complex_t(delta_4th / 24.0f, 0.0f) * u_factor;
             break;
         }
         }
