@@ -16,8 +16,6 @@ reference/
 causal-conv1d/
 documentation/
 backup-setup-guide/
-visualizations/interactive-logger/node_modules/
-visualizations/interactive-logger/public/
 work_dirs/
 output/
 __pycache__/
