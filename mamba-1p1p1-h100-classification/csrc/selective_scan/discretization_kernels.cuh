@@ -73,9 +73,11 @@ __device__ __forceinline__ auto compute_discretization(
                           A_cubed * delta_5th / 120.0f;
             
             // Handle edge case when delta is very small
+            // As delta -> 0, coeff -> 0, so B_d_u -> 0
+            // Use safe computation to avoid division by zero
             if (fabsf(delta_val) < 1e-8f) {
-                // Limit as delta -> 0: coeff -> 0, so use first-order term
-                B_d_u = delta_sq / 2.0f * delta_u_val / delta_val;
+                // Limit as delta -> 0: B_d_u -> 0
+                B_d_u = 0.0f;  // Safe: FOH term vanishes as delta -> 0
             } else {
                 // B_d_u = coeff * u (where u is extracted from delta_u_val)
                 B_d_u = coeff * delta_u_val / delta_val;
@@ -127,19 +129,18 @@ __device__ __forceinline__ auto compute_discretization(
             float coeff_delta3 = A_sq / 6.0f + A_val / 12.0f;  // coefficient for Δ³ term
             float coeff_delta4 = A_cubed / 24.0f + A_sq / 48.0f;  // coefficient for Δ⁴ term
             
-            B_d_u = delta_u_val +
-                    delta_sq * B_val * coeff_delta2 * (delta_u_val / delta_val / B_val) +
-                    delta_cubed * B_val * coeff_delta3 * (delta_u_val / delta_val / B_val) +
-                    delta_4th * B_val * coeff_delta4 * (delta_u_val / delta_val / B_val);
-            
             // Simplified: extract u = delta_u_val / delta_val (for non-variable B case)
             // For variable B case, delta_u_val = B * delta * u, so delta_u_val / delta_val = B * u
+            // Guard against division by zero
             if (fabsf(delta_val) > 1e-8f) {
                 float u_factor = delta_u_val / delta_val;  // This is either 'u' or 'B*u'
                 B_d_u = delta_u_val +  // Δ * (B * u) or Δ * u
                         delta_sq * coeff_delta2 * u_factor +
                         delta_cubed * coeff_delta3 * u_factor +
                         delta_4th * coeff_delta4 * u_factor;
+            } else {
+                // As delta -> 0, higher-order terms vanish, keep only first-order term
+                B_d_u = delta_u_val;
             }
             break;
         }
@@ -290,8 +291,14 @@ __device__ __forceinline__ auto compute_discretization(
             
             // B_d_u = coeff * u (B handled at output)
             // delta_u_val is complex, extract u by dividing by delta
-            complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
-            B_d_u_complex = coeff * u_factor;
+            // Handle edge case when delta is very small to avoid division by zero
+            if (fabsf(delta_val) < 1e-8f) {
+                // Limit as delta -> 0: B_d_u -> 0
+                B_d_u_complex = complex_t(0.0f, 0.0f);  // Safe: FOH term vanishes as delta -> 0
+            } else {
+                complex_t u_factor = delta_u_val * complex_t(1.0f / delta_val, 0.0f);
+                B_d_u_complex = coeff * u_factor;
+            }
             break;
         }
 
