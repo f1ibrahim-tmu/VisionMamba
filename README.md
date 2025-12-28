@@ -3,6 +3,7 @@
 <h3>Beyond ZOH: Advanced Discretization Strategies for State Space Models</h3>
 
 [Fady Ibrahim](https://github.com/f1ibrahim-tmu)<sup>1</sup> \*
+
 <sup>1</sup> Department of Computer Science, Toronto Metropolitan University
 <sup>2</sup> Department of Aerospace Engineering, Toronto Metropolitan University
 
