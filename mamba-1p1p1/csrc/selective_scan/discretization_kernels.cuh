@@ -127,19 +127,18 @@ __device__ __forceinline__ auto compute_discretization(
             float coeff_delta3 = A_sq / 6.0f + A_val / 12.0f;  // coefficient for Δ³ term
             float coeff_delta4 = A_cubed / 24.0f + A_sq / 48.0f;  // coefficient for Δ⁴ term
             
-            B_d_u = delta_u_val +
-                    delta_sq * B_val * coeff_delta2 * (delta_u_val / delta_val / B_val) +
-                    delta_cubed * B_val * coeff_delta3 * (delta_u_val / delta_val / B_val) +
-                    delta_4th * B_val * coeff_delta4 * (delta_u_val / delta_val / B_val);
-            
             // Simplified: extract u = delta_u_val / delta_val (for non-variable B case)
             // For variable B case, delta_u_val = B * delta * u, so delta_u_val / delta_val = B * u
+            // Guard against division by zero
             if (fabsf(delta_val) > 1e-8f) {
                 float u_factor = delta_u_val / delta_val;  // This is either 'u' or 'B*u'
                 B_d_u = delta_u_val +  // Δ * (B * u) or Δ * u
                         delta_sq * coeff_delta2 * u_factor +
                         delta_cubed * coeff_delta3 * u_factor +
                         delta_4th * coeff_delta4 * u_factor;
+            } else {
+                // As delta -> 0, higher-order terms vanish, keep only first-order term
+                B_d_u = delta_u_val;
             }
             break;
         }
