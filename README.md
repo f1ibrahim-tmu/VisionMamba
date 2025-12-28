@@ -1,8 +1,44 @@
-# VisionMamba: Advanced State Space Models for Computer Vision
+<div align="center">
+<h1>State Space Models (S7) - VisionMambaUpgrades </h1>
+<h3>Beyond ZOH: Advanced Discretization Strategies for State Space Models</h3>
 
-A comprehensive implementation of improved State Space Models (SSMs) for vision tasks, featuring enhanced Mamba architectures optimized for visual representation learning. This repository provides efficient, scalable models for image classification, object detection, and semantic segmentation.
+[Fady Ibrahim](https://github.com/f1ibrahim-tmu)<sup>1</sup> \*
+<sup>1</sup> Department of Computer Science, Toronto Metropolitan University
+<sup>2</sup> Department of Aerospace Engineering, Toronto Metropolitan University
+
+(\*) equal contribution, (<sup>:email:</sup>) corresponding author.
+
+<!-- Conference? ([conference paper]()), ArXiv Preprint ([]()) -->
+
+</div>
+
+#
+
+### News
+
+<!-- * **` May. 2nd, 2024`:** Vision Mamba (Vim) is accepted by ICML2024. 🎉 Conference page can be found [here](https://icml.cc/virtual/2024/paper_metadata_from_author/33768).
+
+* **` Feb. 10th, 2024`:** We update Vim-tiny/small weights and training scripts. By placing the class token at middle, Vim achieves improved results. Further details can be found in code and our updated [arXiv](https://arxiv.org/abs/2401.09417).
+
+* **` Jun. 18th, 2024`:** We released our paper on Arxiv. Code/Models are coming soon. Please stay tuned! ☕️ -->
+
+## Abstract
+
+State Space Models, like the Vision Mamba architecture, apply discrete time principles to capture global dependencies in visual sequences with linear scalability. Current state space models rely on Zero Order Hold, simply treating inputs as constant between sampling steps. This reduces fidelity in dynamic visual settings, ultimately limiting the accuracy of modern state space models.
+This paper conducts a controlled comparison of six discretization methods included in the Vision Mamba framework: Zero Order Hold (ZOH), First Order Hold (FOH), Bilinear/Tustin Transform (BIL), Polynomial Interpolation (POL), Higher Order Hold (HOH), and Runge–Kutta 4 (RK4). Each method is evaluated across core vision benchmarks to quantify its effect on accuracy and predictive performance in image classification, semantic segmentation, and object detection. Results show that Polynomial and Higher Order methods provide the highest accuracy gains, though with increased training cost. Bilinear delivers consistent improvements with minimal overhead, offering the strongest balance between precision and efficiency. We clarify the impact of discretization on these models and provide evident reasons for adopting Bilinear Transform as a default baseline for state-of-the-art SSM architectures, including all Mamba-based variants.
+
+<!-- <div align="center">
+<img />
+</div>
 
 ## Overview
+<div align="center">
+<img />
+</div> -->
+
+# Repo Overview
+
+A comprehensive implementation of improved State Space Models (SSMs) for vision tasks, featuring enhanced Mamba architectures optimized for visual representation learning. This repository provides efficient, scalable models for image classification, object detection, and semantic segmentation.
 
 This codebase implements advanced vision models built upon State Space Models, offering significant improvements over traditional Transformer-based architectures. The models leverage bidirectional state space processing, multiple discretization methods, and optimized architectures to achieve superior performance with improved computational efficiency.
 
@@ -49,15 +85,11 @@ conda activate visionmamba
 pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118
 ```
 
-#### AMD GPUs
-
-For AMD GPUs with ROCm support, use a Docker image with PyTorch and ROCm pre-installed.
-
 ### Dependencies
 
 Install required packages:
 
-```bash
+<!-- ```bash
 # Install base requirements
 pip install -r vim/vim_requirements.txt
 
@@ -66,7 +98,7 @@ pip install -e causal_conv1d
 
 # Install mamba-ssm
 pip install -e mamba-1p1p1
-```
+``` -->
 
 ## Quick Start
 
@@ -74,7 +106,7 @@ pip install -e mamba-1p1p1
 
 #### Pretraining
 
-Train a model from scratch:
+<!-- Train a model from scratch:
 
 ```bash
 bash vim/scripts/pt-vim-t.sh
@@ -86,11 +118,11 @@ Fine-tune with finer granularity:
 
 ```bash
 bash vim/scripts/ft-vim-t.sh
-```
+``` -->
 
 ### Evaluation
 
-Evaluate a trained model on ImageNet-1K:
+<!-- Evaluate a trained model on ImageNet-1K:
 
 ```bash
 python vim/main.py \
@@ -98,7 +130,7 @@ python vim/main.py \
     --resume /path/to/checkpoint \
     --model vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
     --data-path /path/to/imagenet
-```
+``` -->
 
 ## Model Configuration
 
