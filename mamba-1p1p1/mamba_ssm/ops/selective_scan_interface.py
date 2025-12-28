@@ -72,6 +72,13 @@ class SelectiveScanFn(torch.autograd.Function):
         force_python = use_cuda_kernel is False
         auto_select = use_cuda_kernel is None
         
+        # Polynomial Interpolation requires bidirectional (non-causal) scan,
+        # which is only implemented in the Python reference. Force Python path.
+        if discretization_method == "poly":
+            force_python = True
+            force_cuda = False
+            auto_select = False
+        
         # Map discretization method string to enum value
         disc_method_map = {
             "zoh": 0,
@@ -659,6 +666,75 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     # Check if deltaA is a matrix (bilinear) or vector (other methods)
     is_matrix_deltaA = deltaA.dim() == 5  # (batch, dim, seqlen, dstate, dstate)
     
+    # Polynomial Interpolation uses bidirectional (non-causal) scan
+    if discretization_method == "poly":
+        # Forward pass: scan from left to right
+        x_f = A.new_zeros((batch, dim, dstate))
+        ys_f = []
+        for i in range(u.shape[2]):
+            if is_matrix_deltaA:
+                x_f = torch.matmul(deltaA[:, :, i], x_f.unsqueeze(-1)).squeeze(-1) + deltaB_u[:, :, i]
+            else:
+                x_f = deltaA[:, :, i] * x_f + deltaB_u[:, :, i]
+            if not is_variable_C:
+                y_f = torch.einsum('bdn,dn->bd', x_f, C)
+            else:
+                if C.dim() == 3:
+                    y_f = torch.einsum('bdn,bn->bd', x_f, C[:, :, i])
+                else:
+                    y_f = torch.einsum('bdn,bdn->bd', x_f, C[:, :, :, i])
+            if y_f.is_complex():
+                y_f = y_f.real * 2
+            ys_f.append(y_f)
+        
+        # Backward pass: scan from right to left (flip inputs)
+        x_b = A.new_zeros((batch, dim, dstate))
+        ys_b = []
+        deltaA_b = deltaA.flip([2])  # Flip along sequence dimension
+        deltaB_u_b = deltaB_u.flip([2])
+        u_b = u.flip([2])
+        # Handle variable C: flip along sequence dimension if it's variable
+        if is_variable_C:
+            if C.dim() == 3:
+                C_b = C.flip([2])  # (B, N, L) -> flip L
+            elif C.dim() == 4:
+                C_b = C.flip([3])  # (B, G, N, L) -> flip L
+            else:
+                C_b = C
+        else:
+            C_b = C
+        
+        for i in range(u_b.shape[2]):
+            if is_matrix_deltaA:
+                x_b = torch.matmul(deltaA_b[:, :, i], x_b.unsqueeze(-1)).squeeze(-1) + deltaB_u_b[:, :, i]
+            else:
+                x_b = deltaA_b[:, :, i] * x_b + deltaB_u_b[:, :, i]
+            if not is_variable_C:
+                y_b = torch.einsum('bdn,dn->bd', x_b, C_b)
+            else:
+                if C_b.dim() == 3:
+                    y_b = torch.einsum('bdn,bn->bd', x_b, C_b[:, :, i])
+                else:
+                    y_b = torch.einsum('bdn,bdn->bd', x_b, C_b[:, :, :, i])
+            if y_b.is_complex():
+                y_b = y_b.real * 2
+            ys_b.append(y_b)
+        
+        # Combine forward and backward passes (average for smooth interpolation)
+        y_f = torch.stack(ys_f, dim=2)  # (batch dim L)
+        y_b = torch.stack(ys_b, dim=2).flip([2])  # (batch dim L), flip back to original order
+        y = (y_f + y_b) / 2.0  # Average forward and backward for non-causal smooth interpolation
+        
+        last_state = x_f  # Use forward state as last state
+        
+        out = y if D is None else y + u * rearrange(D, "d -> d 1")
+        if z is not None:
+            out = out * F.silu(z)
+        out = out.to(dtype=dtype_in)
+        return out if not return_last_state else (out, last_state)
+    
+    # Causal scan for all other methods (including HOH)
+    ys = []  # Initialize output list for causal methods
     for i in range(u.shape[2]):
         if is_matrix_deltaA:
             # Bilinear: deltaA is a matrix, use matrix-vector multiplication
@@ -747,8 +823,11 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
+        # Default to zoh (0) for MambaInnerFnNoOutProj
+        disc_method_enum = 0
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
+            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
         ctx.delta_softplus = delta_softplus
         ctx.checkpoint_lvl = checkpoint_lvl
@@ -891,8 +970,11 @@ class MambaInnerFn(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
+        # Default to zoh (0) for MambaInnerFn
+        disc_method_enum = 0
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
+            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
         ctx.delta_softplus = delta_softplus
         ctx.out_proj_bias_is_None = out_proj_bias is None
@@ -1039,12 +1121,15 @@ class BiMambaInnerFn(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
+        # Default to zoh (0) for BiMambaInnerFn
+        disc_method_enum = 0
         out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
+            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
         assert not A_b.is_complex(), "A should not be complex!!"
         out_b, scan_intermediates_b, out_z_b = selective_scan_cuda.fwd(
-            conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, delta_softplus,
+            conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, delta_softplus, disc_method_enum
         )
 
         out_z = out_z_f + out_z_b.flip([-1])

@@ -10,11 +10,12 @@
 
 // Helper function to compute A_d and B_d for different discretization methods
 // Returns (A_d, B_d * u) as float2 for real or float4 for complex
-template <typename weight_t, bool kIsComplex>
+// delta_u_val_t is float for real case, complex_t for complex case
+template <typename weight_t, bool kIsComplex, typename delta_u_val_t = std::conditional_t<!kIsComplex, float, weight_t>>
 __device__ __forceinline__ auto compute_discretization(
     float delta_val,
     weight_t A_val,
-    float delta_u_val,
+    delta_u_val_t delta_u_val,
     weight_t B_val,
     DiscretizationMethod method)
 {
