@@ -21,16 +21,37 @@ from collections import defaultdict
 
 # Add parent directory to path to import vim modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Also add vim directory to path so rope can be found
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'vim'))
 
 import torch
 import torch.backends.cudnn as cudnn
 
+# Try to import fvcore first, then fall back to thop
+FVCORE_AVAILABLE = False
+THOP_AVAILABLE = False
+FlopCountAnalyzer = None
+thop_profile = None
+
 try:
     from fvcore.nn import FlopCountAnalyzer
     from fvcore.common.timer import Timer
-except ImportError:
-    print("Warning: fvcore not installed. FLOPs computation will be disabled.")
-    FlopCountAnalyzer = None
+    # Verify FlopCountAnalyzer is actually available (some fvcore versions don't have it)
+    if FlopCountAnalyzer is not None:
+        FVCORE_AVAILABLE = True
+        print("✓ Using fvcore for FLOPs computation")
+    else:
+        raise ImportError("FlopCountAnalyzer not available in this fvcore version")
+except (ImportError, AttributeError) as e:
+    # Try thop as fallback
+    try:
+        from thop import profile, clever_format
+        thop_profile = profile
+        THOP_AVAILABLE = True
+        print("✓ Using thop for FLOPs computation (fvcore not available or incompatible)")
+    except ImportError:
+        print("⚠ Neither fvcore nor thop available. FLOPs computation will be disabled.")
+        print("   Install one of: pip install fvcore  or  pip install thop")
 
 # Import vim modules
 import vim.models_mamba as models_mamba
@@ -95,9 +116,9 @@ def load_model(args):
 
 
 def compute_flops(model, args):
-    """Compute FLOPs for the model"""
-    if FlopCountAnalyzer is None:
-        print("⚠ fvcore not available, skipping FLOPs computation")
+    """Compute FLOPs for the model using fvcore or thop"""
+    if not FVCORE_AVAILABLE and not THOP_AVAILABLE:
+        print("⚠ No FLOPs computation library available, skipping FLOPs computation")
         return None
     
     try:
@@ -106,19 +127,30 @@ def compute_flops(model, args):
         # Create dummy input
         dummy_input = torch.randn(1, 3, args.input_size, args.input_size, device=args.device)
         
-        # Compute FLOPs
-        flops_analyzer = FlopCountAnalyzer(model, dummy_input)
-        total_flops = flops_analyzer.total()
+        # Use fvcore if available
+        if FVCORE_AVAILABLE and FlopCountAnalyzer is not None:
+            flops_analyzer = FlopCountAnalyzer(model, dummy_input)
+            total_flops = flops_analyzer.total()
+            flops_giga = total_flops / 1e9
+            print(f"✓ Total FLOPs (fvcore): {flops_giga:.2f} B (Billion)")
+            print(f"✓ FLOPs per image: {flops_giga:.2f} B")
+            return flops_giga
         
-        flops_giga = total_flops / 1e9
-        flops_per_image = flops_giga # Per single image
-        
-        print(f"✓ Total FLOPs: {flops_giga:.2f} B (Billion)")
-        print(f"✓ FLOPs per image: {flops_giga:.2f} B")
-        
-        return flops_giga
+        # Fall back to thop
+        elif THOP_AVAILABLE and thop_profile is not None:
+            flops, params = thop_profile(model, inputs=(dummy_input,), verbose=False)
+            flops_giga = flops / 1e9
+            print(f"✓ Total FLOPs (thop): {flops_giga:.2f} B (Billion)")
+            print(f"✓ FLOPs per image: {flops_giga:.2f} B")
+            return flops_giga
+        else:
+            print("⚠ FLOPs computation libraries not properly initialized")
+            return None
+            
     except Exception as e:
         print(f"✗ Error computing FLOPs: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
