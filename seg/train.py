@@ -74,6 +74,14 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    
+    # Weights & Biases arguments
+    parser.add_argument('--use-wandb', action='store_true', help='Use Weights & Biases for logging')
+    parser.add_argument('--wandb-project', default='mmsegmentation', type=str, help='W&B project name')
+    parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
+    parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name')
+    parser.add_argument('--wandb-tags', nargs='+', default=[], help='Tags for W&B run')
+    
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -173,9 +181,18 @@ def main():
     if not hasattr(cfg, 'randomness'):
         cfg.randomness = dict(seed=args.seed, deterministic=args.deterministic)
     
+    # Add W&B config to cfg
+    if args.use_wandb:
+        cfg.use_wandb = True
+        cfg.wandb_project = args.wandb_project
+        cfg.wandb_entity = args.wandb_entity
+        cfg.wandb_run_name = args.wandb_run_name
+        cfg.wandb_tags = args.wandb_tags
+    
     # Run training using Runner.from_cfg()
     # This handles everything: model, optimizer, dataloaders, training loop
     validate_flag = not args.no_validate
+    
     train_segmentor(
         cfg,
         distributed=distributed,

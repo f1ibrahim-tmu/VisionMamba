@@ -27,6 +27,12 @@ from detectron2.utils.file_io import PathManager
 
 from .train_loop import HookBase
 
+# Import WandbHook
+try:
+    from .wandb_hook import WandbHook
+except ImportError:
+    pass
+
 __all__ = [
     "CallbackHook",
     "IterationTimer",
@@ -40,6 +46,7 @@ __all__ = [
     "PreciseBN",
     "TorchProfiler",
     "TorchMemoryStats",
+    "WandbHook",
 ]
 
 

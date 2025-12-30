@@ -17,6 +17,13 @@ from timm.utils import accuracy, ModelEma
 from losses import DistillationLoss
 import utils
 
+# Optional W&B import
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -36,6 +43,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     epoch_start_time = time.time()
     total_samples = 0
     iter_start_time = time.time()
+    iteration = 0
         
     # debug
     # count = 0
@@ -104,6 +112,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
         # Calculate throughput (img/sec)
         iter_time = time.time() - iter_start_time
+        img_per_sec = 0
         if iter_time > 0:
             img_per_sec = batch_size / iter_time
             metric_logger.update(img_s=img_per_sec)
@@ -111,6 +120,17 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        
+        # Log to W&B at regular intervals (every 100 iterations)
+        if WANDB_AVAILABLE and wandb.run is not None and args is not None and hasattr(args, 'use_wandb') and args.use_wandb:
+            if hasattr(utils, 'get_rank') and utils.get_rank() == 0:
+                iteration += 1
+                if iteration % 100 == 0:
+                    wandb.log({
+                        'train/iter_loss': loss_value,
+                        'train/iter_lr': optimizer.param_groups[0]["lr"],
+                        'train/iter_throughput': img_per_sec,
+                    }, commit=False)
     
     # Calculate samples per epoch
     epoch_time = time.time() - epoch_start_time

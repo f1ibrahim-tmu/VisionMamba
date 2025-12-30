@@ -19,6 +19,13 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
+# Optional W&B import
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 # Add parent directory to path to import vim modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # Also add vim directory to path so rope can be found
@@ -79,6 +86,12 @@ def get_args_parser():
     parser.add_argument('--output-dir', default='./benchmark_results', type=str, help='Output directory for results')
     parser.add_argument('--device', default='cuda', type=str, help='Device to use')
     parser.add_argument('--seed', default=0, type=int)
+    
+    # W&B parameters
+    parser.add_argument('--use-wandb', action='store_true', help='Log benchmark results to W&B')
+    parser.add_argument('--wandb-project', default='visionmamba-benchmarks', type=str, help='W&B project name')
+    parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
+    parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name')
     
     return parser
 
@@ -352,6 +365,23 @@ def main(args):
     print("Vision Mamba Latency & FLOPs Benchmark")
     print(f"{'='*60}")
     
+    # Initialize W&B if requested
+    if args.use_wandb and WANDB_AVAILABLE:
+        method = extract_method_name(args.output_dir)
+        run_name = args.wandb_run_name or f"{method}_bs{args.batch_size}"
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=run_name,
+            config={
+                'model': args.model,
+                'batch_size': args.batch_size,
+                'input_size': args.input_size,
+                'num_samples': args.num_samples,
+                'method': method,
+            }
+        )
+    
     # Set seed
     torch.manual_seed(args.seed)
     
@@ -388,6 +418,24 @@ def main(args):
     # Save results with method name and batch size in filename
     method = extract_method_name(args.output_dir)
     save_results(results, args.output_dir, method=method, batch_size=args.batch_size)
+    
+    # Log to W&B if enabled
+    if args.use_wandb and WANDB_AVAILABLE:
+        wandb_log = {
+            'benchmark/latency_avg_ms': results['latency']['avg_ms'],
+            'benchmark/latency_min_ms': results['latency']['min_ms'],
+            'benchmark/latency_max_ms': results['latency']['max_ms'],
+            'benchmark/latency_median_ms': results['latency']['median_ms'],
+            'benchmark/throughput_img_per_sec': 1000 / results['latency']['avg_ms'],
+            'benchmark/flops_billion': results['flops'] if results['flops'] else None,
+            'model/total_params': results['model_info']['total_params'],
+            'model/trainable_params': results['model_info']['trainable_params'],
+            'model/size_mb': results['model_info']['model_size_mb'],
+        }
+        # Remove None values
+        wandb_log = {k: v for k, v in wandb_log.items() if v is not None}
+        wandb.log(wandb_log)
+        wandb.finish()
     
     return results
 

@@ -130,6 +130,12 @@ Run on multiple machines:
         help="initialization URL for pytorch distributed backend. See "
         "https://pytorch.org/docs/stable/distributed.html for details.",
     )
+    # Weights & Biases arguments
+    parser.add_argument("--use-wandb", action="store_true", help="Use Weights & Biases for logging")
+    parser.add_argument("--wandb-project", default="detectron2", type=str, help="W&B project name")
+    parser.add_argument("--wandb-entity", default=None, type=str, help="W&B entity/team name")
+    parser.add_argument("--wandb-run-name", default=None, type=str, help="W&B run name")
+    parser.add_argument("--wandb-tags", nargs="+", default=[], help="Tags for W&B run")
     parser.add_argument(
         "opts",
         help="""

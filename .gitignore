@@ -19,3 +19,5 @@ backup-setup-guide/
 work_dirs/
 output/
 __pycache__/
+wandb/
+*.wandb

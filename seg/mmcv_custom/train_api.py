@@ -89,6 +89,19 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
     log_interval = cfg.default_hooks.get('logger', {}).get('interval', 50) if hasattr(cfg, 'default_hooks') and cfg.default_hooks else 50
     runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
     
+    # Register W&B hook if enabled
+    if hasattr(cfg, 'use_wandb') and cfg.use_wandb:
+        from .wandb_hook import WandbHook
+        wandb_hook = WandbHook(
+            project=getattr(cfg, 'wandb_project', 'mmsegmentation'),
+            entity=getattr(cfg, 'wandb_entity', None),
+            name=getattr(cfg, 'wandb_run_name', None),
+            tags=getattr(cfg, 'wandb_tags', []),
+            log_interval=log_interval,
+            enabled=True
+        )
+        runner.register_hook(wandb_hook, priority='NORMAL')
+    
     # Start training
     runner.train()
 ||||||| parent of 99cf74f (Add throughput metrics (img/sec and samples/epoch) to training loops)
@@ -167,6 +180,19 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
     from .throughput_hook import ThroughputHook
     log_interval = cfg.log_config.get('interval', 50) if cfg.log_config else 50
     runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
+    
+    # register W&B hook if enabled
+    if hasattr(cfg, 'use_wandb') and cfg.use_wandb:
+        from .wandb_hook import WandbHook
+        wandb_hook = WandbHook(
+            project=getattr(cfg, 'wandb_project', 'mmsegmentation'),
+            entity=getattr(cfg, 'wandb_entity', None),
+            name=getattr(cfg, 'wandb_run_name', None),
+            tags=getattr(cfg, 'wandb_tags', []),
+            log_interval=log_interval,
+            enabled=True
+        )
+        runner.register_hook(wandb_hook, priority='NORMAL')
 
     # an ugly walkaround to make the .log and .log.json filenames the same
     runner.timestamp = timestamp

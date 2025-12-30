@@ -32,6 +32,7 @@ import utils
 
 # log about
 import mlflow
+import wandb
 from torch.distributed.elastic.multiprocessing.errors import record
 
 
@@ -218,6 +219,14 @@ def get_args_parser():
     parser.set_defaults(if_random_token_rank=False)
 
     parser.add_argument('--local-rank', default=0, type=int)
+    
+    # Weights & Biases arguments
+    parser.add_argument('--use-wandb', action='store_true', help='Use Weights & Biases for logging')
+    parser.add_argument('--wandb-project', default='visionmamba', type=str, help='W&B project name')
+    parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
+    parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name (defaults to output_dir name)')
+    parser.add_argument('--wandb-tags', nargs='+', default=[], help='Tags for W&B run')
+    
     return parser
 
 @record
@@ -240,11 +249,26 @@ def main(args):
     cudnn.benchmark = True
 
     # log about
-    run_name = args.output_dir.split("/")[-1]
+    run_name = args.output_dir.split("/")[-1] if args.output_dir else "default_run"
     if args.local_rank == 0 and args.gpu == 0:
         mlflow.start_run(run_name=run_name)
         for key, value in vars(args).items():
             mlflow.log_param(key, value)
+        
+        # Initialize Weights & Biases
+        if args.use_wandb:
+            wandb_run_name = args.wandb_run_name or run_name
+            wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity,
+                name=wandb_run_name,
+                tags=args.wandb_tags if args.wandb_tags else None,
+                config=vars(args),
+                reinit=True,
+                settings=wandb.Settings(start_method="fork" if hasattr(wandb.Settings, 'start_method') else None)
+            )
+            # Log model parameters count (will be updated later)
+            wandb.config.update({"n_parameters": 0}, allow_val_change=True)
 
     dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
     dataset_val, _ = build_dataset(is_train=False, args=args)
@@ -487,6 +511,8 @@ def main(args):
     # log about
     if args.local_rank == 0 and args.gpu == 0:
         mlflow.log_param("n_parameters", n_parameters)
+        if args.use_wandb:
+            wandb.config.update({"n_parameters": n_parameters}, allow_val_change=True)
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -547,6 +573,20 @@ def main(args):
         if args.local_rank == 0 and args.gpu == 0:
             for key, value in log_stats.items():
                 mlflow.log_metric(key, value, log_stats['epoch'])
+            
+            # Log to Weights & Biases
+            if args.use_wandb:
+                wandb_log = {}
+                # Log training metrics
+                for k, v in train_stats.items():
+                    wandb_log[f'train/{k}'] = v
+                # Log validation metrics
+                for k, v in test_stats.items():
+                    wandb_log[f'val/{k}'] = v
+                # Log epoch and max accuracy
+                wandb_log['epoch'] = epoch
+                wandb_log['max_accuracy'] = max_accuracy
+                wandb.log(wandb_log, step=epoch)
         
         
         if args.output_dir and utils.is_main_process():
@@ -556,6 +596,12 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    
+    # Finalize W&B run
+    if args.local_rank == 0 and args.gpu == 0:
+        if args.use_wandb:
+            wandb.log({"training/total_time_seconds": total_time})
+            wandb.finish()
 
 
 if __name__ == '__main__':

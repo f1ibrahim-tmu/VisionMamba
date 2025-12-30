@@ -34,6 +34,7 @@ from detectron2.data import (
     build_detection_train_loader,
 )
 from detectron2.engine import default_argument_parser, default_setup, default_writers, launch
+from detectron2.engine.hooks import WandbHook
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
     CityscapesSemSegEvaluator,
@@ -110,7 +111,7 @@ def do_test(cfg, model):
     return results
 
 
-def do_train(cfg, model, resume=False):
+def do_train(cfg, model, resume=False, args=None):
     model.train()
     optimizer = build_optimizer(cfg, model)
     scheduler = build_lr_scheduler(cfg, optimizer)
@@ -129,11 +130,33 @@ def do_train(cfg, model, resume=False):
 
     writers = default_writers(cfg.OUTPUT_DIR, max_iter) if comm.is_main_process() else []
 
+    # Initialize W&B hook if enabled
+    wandb_hook = None
+    if args and getattr(args, 'use_wandb', False):
+        wandb_hook = WandbHook(
+            project=getattr(args, 'wandb_project', 'detectron2'),
+            entity=getattr(args, 'wandb_entity', None),
+            name=getattr(args, 'wandb_run_name', None),
+            tags=getattr(args, 'wandb_tags', []),
+            enabled=True
+        )
+        # Store trainer reference for hook
+        class TrainerWrapper:
+            def __init__(self, cfg, storage):
+                self.cfg = cfg
+                self.storage = storage
+        trainer_wrapper = TrainerWrapper(cfg, None)
+        wandb_hook.trainer = trainer_wrapper
+
     # compared to "train_net.py", we do not support accurate timing and
     # precise BN here, because they are not trivial to implement in a small training loop
     data_loader = build_detection_train_loader(cfg)
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
+        # Update trainer wrapper with storage
+        if wandb_hook:
+            wandb_hook.trainer.storage = storage
+            wandb_hook.before_train()
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
             storage.iter = iteration
 
@@ -166,7 +189,14 @@ def do_train(cfg, model, resume=False):
             ):
                 for writer in writers:
                     writer.write()
+                # Log to W&B
+                if wandb_hook:
+                    wandb_hook.after_step()
             periodic_checkpointer.step(iteration)
+        
+        # Finalize W&B
+        if wandb_hook:
+            wandb_hook.after_train()
 
 
 def setup(args):
@@ -176,6 +206,19 @@ def setup(args):
     cfg = get_cfg()
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+    
+    # Add W&B arguments if not already in opts
+    if not hasattr(args, 'use_wandb'):
+        args.use_wandb = getattr(args, 'use_wandb', False)
+    if not hasattr(args, 'wandb_project'):
+        args.wandb_project = getattr(args, 'wandb_project', 'detectron2')
+    if not hasattr(args, 'wandb_entity'):
+        args.wandb_entity = getattr(args, 'wandb_entity', None)
+    if not hasattr(args, 'wandb_run_name'):
+        args.wandb_run_name = getattr(args, 'wandb_run_name', None)
+    if not hasattr(args, 'wandb_tags'):
+        args.wandb_tags = getattr(args, 'wandb_tags', [])
+    
     cfg.freeze()
     default_setup(
         cfg, args
@@ -200,7 +243,7 @@ def main(args):
             model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
         )
 
-    do_train(cfg, model, resume=args.resume)
+    do_train(cfg, model, resume=args.resume, args=args)
     return do_test(cfg, model)
 
 
