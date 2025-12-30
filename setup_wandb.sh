@@ -18,8 +18,9 @@ fi
 # Login to W&B
 echo ""
 echo "Logging in to Weights & Biases..."
-echo "Using API key: 964b6fd194cced2fc3fabd18754dd54218145929"
-wandb login 964b6fd194cced2fc3fabd18754dd54218145929
+echo "Please enter your W&B API key when prompted."
+echo "You can find your API key at: https://wandb.ai/authorize"
+wandb login
 
 echo ""
 echo "=========================================="
