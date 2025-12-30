@@ -20,7 +20,11 @@ except ImportError:
 
 
 def parse_benchmark_results(results_dir):
-    """Parse all benchmark JSONs in a directory"""
+    """Parse all benchmark JSONs in a directory
+    
+    Supports both old format (benchmark_timestamp.json) and new format 
+    (benchmark_method_bsX_timestamp.json)
+    """
     results = []
     
     results_path = Path(results_dir)
@@ -31,6 +35,8 @@ def parse_benchmark_results(results_dir):
         try:
             with open(json_file, 'r') as f:
                 data = json.load(f)
+                # Add filename info for debugging (optional)
+                data['_filename'] = json_file.name
                 results.append(data)
         except Exception as e:
             print(f"Warning: Could not parse {json_file}: {e}")
@@ -45,7 +51,10 @@ def compare_methods(output_base='./output', batch_size=1):
     comparison = []
     
     for method in methods:
-        results_dir = f"{output_base}/vim_tiny_{method}/benchmark_results"
+        # Try classification_logs path first, then fallback to direct path
+        results_dir = f"{output_base}/classification_logs/vim_tiny_{method}/benchmark_results"
+        if not os.path.exists(results_dir):
+            results_dir = f"{output_base}/vim_tiny_{method}/benchmark_results"
         
         if os.path.exists(results_dir):
             results = parse_benchmark_results(results_dir)
@@ -153,7 +162,10 @@ def compare_methods(output_base='./output', batch_size=1):
 
 def compare_batch_sizes(output_base='./output', method='zoh'):
     """Compare performance across different batch sizes for a single method"""
-    results_dir = f"{output_base}/vim_tiny_{method}/benchmark_results"
+    # Try classification_logs path first, then fallback to direct path
+    results_dir = f"{output_base}/classification_logs/vim_tiny_{method}/benchmark_results"
+    if not os.path.exists(results_dir):
+        results_dir = f"{output_base}/vim_tiny_{method}/benchmark_results"
     
     if not os.path.exists(results_dir):
         print(f"Results directory not found: {results_dir}")
