@@ -9,10 +9,10 @@ OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --master_port=0 \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_highorder \
-    --batch-size 128 \
+    --batch-size 256 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
-    --lr 0.001 \
+    --lr 0.002 \
     --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
     --output_dir ./output/vim_tiny_highorder \

@@ -55,6 +55,14 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    
+    # Weights & Biases arguments
+    parser.add_argument('--use-wandb', action='store_true', help='Use Weights & Biases for logging')
+    parser.add_argument('--wandb-project', default='mmsegmentation', type=str, help='W&B project name')
+    parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
+    parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name')
+    parser.add_argument('--wandb-tags', nargs='+', default=[], help='Tags for W&B run')
+    
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -151,6 +159,15 @@ def main():
             PALETTE=datasets[0].PALETTE)
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
+    
+    # Add W&B config to cfg
+    if args.use_wandb:
+        cfg.use_wandb = True
+        cfg.wandb_project = args.wandb_project
+        cfg.wandb_entity = args.wandb_entity
+        cfg.wandb_run_name = args.wandb_run_name
+        cfg.wandb_tags = args.wandb_tags
+    
     train_segmentor(
         model,
         datasets,

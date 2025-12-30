@@ -55,7 +55,7 @@ echo ""
 echo "Running benchmarks with different batch sizes..."
 echo ""
 
-for BATCH_SIZE in 1 4 8 16 32; do
+for BATCH_SIZE in 1 4 8 16 32 64 128 256 512; do
     echo "----------------------------------------"
     echo "Benchmark: Batch Size = $BATCH_SIZE"
     echo "----------------------------------------"

@@ -109,6 +109,19 @@ def train_segmentor(model,
     from .throughput_hook import ThroughputHook
     log_interval = cfg.log_config.get('interval', 50) if cfg.log_config else 50
     runner.register_hook(ThroughputHook(log_interval=log_interval), priority='NORMAL')
+    
+    # register W&B hook if enabled
+    if hasattr(cfg, 'use_wandb') and cfg.use_wandb:
+        from .wandb_hook import WandbHook
+        wandb_hook = WandbHook(
+            project=getattr(cfg, 'wandb_project', 'mmsegmentation'),
+            entity=getattr(cfg, 'wandb_entity', None),
+            name=getattr(cfg, 'wandb_run_name', None),
+            tags=getattr(cfg, 'wandb_tags', []),
+            log_interval=log_interval,
+            enabled=True
+        )
+        runner.register_hook(wandb_hook, priority='NORMAL')
 
     # an ugly walkaround to make the .log and .log.json filenames the same
     runner.timestamp = timestamp
