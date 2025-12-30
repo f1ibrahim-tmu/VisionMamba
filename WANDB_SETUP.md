@@ -22,13 +22,7 @@ pip install wandb
 
 2. Login to W&B using your API key:
 ```bash
-wandb login 964b6fd194cced2fc3fabd18754dd54218145929
-```
-
-Alternatively, you can set the API key as an environment variable:
-```bash
-export WANDB_API_KEY=964b6fd194cced2fc3fabd18754dd54218145929
-```
+wandb login 
 
 ## Usage
 
