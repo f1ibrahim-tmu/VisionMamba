@@ -273,13 +273,38 @@ def get_model_info(model):
     }
 
 
-def save_results(results, output_dir):
-    """Save benchmark results to JSON"""
+def extract_method_name(output_dir):
+    """Extract method name from output directory path"""
+    # Try to extract from path like: .../vim_tiny_zoh/benchmark_results
+    path_parts = os.path.normpath(output_dir).split(os.sep)
+    for part in reversed(path_parts):
+        if 'vim_tiny_' in part:
+            method = part.replace('vim_tiny_', '')
+            return method
+    # Fallback: try to extract from any part containing method names
+    methods = ['zoh', 'foh', 'bilinear', 'poly', 'highorder', 'rk4']
+    for part in path_parts:
+        for method in methods:
+            if method in part.lower():
+                return method
+    return 'unknown'
+
+
+def save_results(results, output_dir, method=None, batch_size=None):
+    """Save benchmark results to JSON with descriptive filename"""
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create results filename with timestamp
+    # Extract method name if not provided
+    if method is None:
+        method = extract_method_name(output_dir)
+    
+    # Get batch_size from results if not provided
+    if batch_size is None:
+        batch_size = results.get('batch_size', 'unknown')
+    
+    # Create results filename: benchmark_method_batchsize_timestamp.json
     timestamp = time.strftime('%Y%m%d_%H%M%S')
-    results_file = os.path.join(output_dir, f'benchmark_{timestamp}.json')
+    results_file = os.path.join(output_dir, f'benchmark_{method}_bs{batch_size}_{timestamp}.json')
     
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
@@ -360,8 +385,9 @@ def main(args):
     # Print summary
     print_summary(results)
     
-    # Save results
-    save_results(results, args.output_dir)
+    # Save results with method name and batch size in filename
+    method = extract_method_name(args.output_dir)
+    save_results(results, args.output_dir, method=method, batch_size=args.batch_size)
     
     return results
 
