@@ -209,6 +209,144 @@ def compare_batch_sizes(output_base='./output', method='zoh'):
     return batch_comparison
 
 
+def compare_all_methods_all_batch_sizes(output_base='./output'):
+    """Compare all methods across all batch sizes - creates a comprehensive table"""
+    methods = ['zoh', 'foh', 'bilinear', 'poly', 'highorder', 'rk4']
+    
+    all_results = []
+    
+    # Collect all results
+    for method in methods:
+        # Try classification_logs path first, then fallback to direct path
+        results_dir = f"{output_base}/classification_logs/vim_tiny_{method}/benchmark_results"
+        if not os.path.exists(results_dir):
+            results_dir = f"{output_base}/vim_tiny_{method}/benchmark_results"
+        
+        if os.path.exists(results_dir):
+            results = parse_benchmark_results(results_dir)
+            
+            for result in results:
+                latency = result.get('latency', {})
+                model_info = result.get('model_info', {})
+                flops = result.get('flops')
+                
+                if latency and latency.get('avg_ms'):
+                    throughput = 1000 / latency.get('avg_ms', 1.0)
+                else:
+                    throughput = None
+                
+                all_results.append({
+                    'Method': method.upper(),
+                    'Batch Size': result.get('batch_size', 'unknown'),
+                    'Latency (ms/img)': latency.get('avg_ms') if latency else None,
+                    'Latency Min (ms)': latency.get('min_ms') if latency else None,
+                    'Latency Max (ms)': latency.get('max_ms') if latency else None,
+                    'Throughput (img/s)': throughput,
+                    'FLOPs (B)': flops if flops else None,
+                    'Params (M)': model_info.get('total_params', 0) / 1e6 if model_info else 0,
+                })
+    
+    if not all_results:
+        print("No benchmark results found to compare.")
+        return None
+    
+    # Print comprehensive comparison
+    print("\n" + "="*120)
+    print("COMPREHENSIVE BENCHMARK COMPARISON: ALL METHODS × ALL BATCH SIZES")
+    print("="*120)
+    
+    if HAS_PANDAS:
+        df = pd.DataFrame(all_results)
+        
+        # Sort by Method, then Batch Size
+        df = df.sort_values(['Method', 'Batch Size'])
+        
+        print("\nFull Comparison Table:")
+        print(df.to_string(index=False))
+        print("="*120)
+        
+        # Save to CSV
+        csv_path = './benchmark_comparison_all_methods_all_batch_sizes.csv'
+        df.to_csv(csv_path, index=False)
+        print(f"\n✓ Full comparison saved to {csv_path}")
+        
+        # Create pivot table for easier viewing (Method vs Batch Size)
+        print("\n" + "="*120)
+        print("PIVOT TABLE: Latency (ms/img) by Method and Batch Size")
+        print("="*120)
+        pivot_latency = df.pivot_table(
+            values='Latency (ms/img)', 
+            index='Method', 
+            columns='Batch Size', 
+            aggfunc='first'
+        )
+        print(pivot_latency.to_string())
+        
+        # Save pivot table
+        pivot_csv = './benchmark_pivot_latency.csv'
+        pivot_latency.to_csv(pivot_csv)
+        print(f"\n✓ Pivot table saved to {pivot_csv}")
+        
+        # Throughput pivot table
+        print("\n" + "="*120)
+        print("PIVOT TABLE: Throughput (img/s) by Method and Batch Size")
+        print("="*120)
+        pivot_throughput = df.pivot_table(
+            values='Throughput (img/s)', 
+            index='Method', 
+            columns='Batch Size', 
+            aggfunc='first'
+        )
+        print(pivot_throughput.to_string())
+        
+        # Save throughput pivot table
+        pivot_throughput_csv = './benchmark_pivot_throughput.csv'
+        pivot_throughput.to_csv(pivot_throughput_csv)
+        print(f"\n✓ Throughput pivot table saved to {pivot_throughput_csv}")
+        
+        # Summary statistics
+        print("\n" + "="*120)
+        print("SUMMARY STATISTICS")
+        print("="*120)
+        
+        # Fastest method for each batch size
+        for bs in sorted(df['Batch Size'].unique()):
+            bs_data = df[df['Batch Size'] == bs]
+            if bs_data['Latency (ms/img)'].notna().any():
+                fastest = bs_data.loc[bs_data['Latency (ms/img)'].idxmin()]
+                print(f"\nBatch Size {bs}:")
+                print(f"  Fastest: {fastest['Method']} ({fastest['Latency (ms/img)']:.4f} ms/img, {fastest['Throughput (img/s)']:.2f} img/s)")
+        
+        # Overall fastest
+        if df['Latency (ms/img)'].notna().any():
+            overall_fastest = df.loc[df['Latency (ms/img)'].idxmin()]
+            print(f"\nOverall Fastest:")
+            print(f"  Method: {overall_fastest['Method']}, Batch Size: {overall_fastest['Batch Size']}")
+            print(f"  Latency: {overall_fastest['Latency (ms/img)']:.4f} ms/img")
+            print(f"  Throughput: {overall_fastest['Throughput (img/s)']:.2f} img/s")
+        
+    else:
+        # Print without pandas (simpler format)
+        print("\nMethod | Batch Size | Latency (ms/img) | Throughput (img/s)")
+        print("-" * 120)
+        for row in sorted(all_results, key=lambda x: (x['Method'], x['Batch Size'])):
+            method = row['Method']
+            batch = row['Batch Size']
+            latency = f"{row['Latency (ms/img)']:.4f}" if row['Latency (ms/img)'] else "N/A"
+            throughput = f"{row['Throughput (img/s)']:.2f}" if row['Throughput (img/s)'] else "N/A"
+            print(f"{method:6} | {batch:10} | {latency:16} | {throughput:17}")
+        
+        # Save to JSON
+        json_path = './benchmark_comparison_all_methods_all_batch_sizes.json'
+        with open(json_path, 'w') as f:
+            json.dump(all_results, f, indent=2)
+        print(f"\n✓ Comparison saved to {json_path}")
+    
+    print("="*120)
+    
+    return all_results
+
+
 def main():
     parser = argparse.ArgumentParser(description='Compare benchmark results across methods')
     parser.add_argument('--output-base', default='./output', type=str,
@@ -217,10 +355,14 @@ def main():
                         help='Batch size to compare (default: 1)')
     parser.add_argument('--compare-batch-sizes', type=str, default=None,
                         help='Compare batch sizes for a specific method (e.g., zoh)')
+    parser.add_argument('--compare-all', action='store_true',
+                        help='Compare all methods across all batch sizes')
     
     args = parser.parse_args()
     
-    if args.compare_batch_sizes:
+    if args.compare_all:
+        compare_all_methods_all_batch_sizes(args.output_base)
+    elif args.compare_batch_sizes:
         compare_batch_sizes(args.output_base, args.compare_batch_sizes)
     else:
         compare_methods(args.output_base, args.batch_size)
