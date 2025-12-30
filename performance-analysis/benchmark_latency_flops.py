@@ -66,6 +66,8 @@ def get_args_parser():
                         type=str, help='Model name')
     parser.add_argument('--checkpoint', type=str, help='Path to model checkpoint')
     parser.add_argument('--input-size', default=224, type=int, help='Input image size')
+    parser.add_argument('--num-classes', type=int, default=None, 
+                        help='Number of classes (auto-detected from checkpoint if not specified)')
     
     # Benchmark parameters
     parser.add_argument('--batch-size', default=1, type=int, help='Batch size for inference')
@@ -88,7 +90,9 @@ def load_model(args):
     if not hasattr(models_mamba, args.model):
         raise ValueError(f"Model {args.model} not found in models_mamba. Available models: {[m for m in dir(models_mamba) if m.startswith('vim_')]}")
     
-    model = models_mamba.__dict__[args.model](pretrained=False)
+    # Load checkpoint first to detect num_classes if needed
+    num_classes = args.num_classes
+    state_dict = None
     
     if args.checkpoint and os.path.exists(args.checkpoint):
         print(f"Loading checkpoint from {args.checkpoint}")
@@ -105,8 +109,46 @@ def load_model(args):
         # Remove 'module.' prefix if present (from distributed training)
         state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
         
-        model.load_state_dict(state_dict, strict=False)
-        print(f"✓ Checkpoint loaded successfully")
+        # Auto-detect num_classes from checkpoint if not specified
+        if num_classes is None and 'head.weight' in state_dict:
+            num_classes = state_dict['head.weight'].shape[0]
+            print(f"✓ Auto-detected num_classes={num_classes} from checkpoint")
+        elif num_classes is None and 'head.bias' in state_dict:
+            num_classes = state_dict['head.bias'].shape[0]
+            print(f"✓ Auto-detected num_classes={num_classes} from checkpoint")
+    
+    # Create model with detected/specified num_classes
+    if num_classes is not None:
+        print(f"Creating model with num_classes={num_classes}")
+        model = models_mamba.__dict__[args.model](pretrained=False, num_classes=num_classes, img_size=args.input_size)
+    else:
+        model = models_mamba.__dict__[args.model](pretrained=False, img_size=args.input_size)
+    
+    # Load checkpoint if available
+    if state_dict is not None:
+        # Filter out incompatible keys (size mismatches)
+        model_state_dict = model.state_dict()
+        filtered_state_dict = {}
+        skipped_keys = []
+        
+        for k, v in state_dict.items():
+            if k in model_state_dict:
+                if model_state_dict[k].shape == v.shape:
+                    filtered_state_dict[k] = v
+                else:
+                    skipped_keys.append(f"{k} (shape mismatch: checkpoint {v.shape} vs model {model_state_dict[k].shape})")
+            else:
+                skipped_keys.append(f"{k} (not in model)")
+        
+        if skipped_keys:
+            print(f"⚠ Skipping {len(skipped_keys)} incompatible keys:")
+            for key in skipped_keys[:5]:  # Show first 5
+                print(f"   - {key}")
+            if len(skipped_keys) > 5:
+                print(f"   ... and {len(skipped_keys) - 5} more")
+        
+        model.load_state_dict(filtered_state_dict, strict=False)
+        print(f"✓ Checkpoint loaded successfully ({len(filtered_state_dict)}/{len(state_dict)} keys matched)")
     else:
         print(f"⚠ No checkpoint found, using randomly initialized weights")
     
