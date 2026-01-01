@@ -21,6 +21,7 @@ namespace cub = hipcub;
 #include "selective_scan_common.h"
 #include "static_switch.h"
 #include "discretization_kernels.cuh"
+#include "matrix_ops.cuh"
 
 template <int kNThreads_, int kNItems_, int kNRows_, bool kIsEvenLen_,
           bool kIsVariableB_, bool kIsVariableC_,
@@ -106,7 +107,25 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
     const int group_id = dim_id / (params.dim_ngroups_ratio);
     input_t *u = reinterpret_cast<input_t *>(params.u_ptr) + batch_id * params.u_batch_stride + dim_id * kNRows * params.u_d_stride;
     input_t *delta = reinterpret_cast<input_t *>(params.delta_ptr) + batch_id * params.delta_batch_stride + dim_id * kNRows * params.delta_d_stride;
-    weight_t *A = reinterpret_cast<weight_t *>(params.A_ptr) + dim_id * kNRows * params.A_d_stride;
+
+    // Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
+    // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+    // Handle full A matrices differently
+    weight_t *A = nullptr;
+    weight_t *A_full = nullptr; // Full A matrix pointer
+    if (params.is_full_A_matrix)
+    {
+        // A is (dim, d_state, d_state) - full matrix, stored row-major per channel
+        // A[dim_id] is a (dstate, dstate) matrix
+        // Access: A_ptr + dim_id * (dstate * dstate) for row-major storage
+        A_full = reinterpret_cast<weight_t *>(params.A_ptr) + dim_id * params.dstate * params.dstate;
+    }
+    else
+    {
+        // A is (dim, d_state) - diagonal
+        A = reinterpret_cast<weight_t *>(params.A_ptr) + dim_id * kNRows * params.A_d_stride;
+    }
+
     weight_t *B = reinterpret_cast<weight_t *>(params.B_ptr) + dim_id * kNRows * params.B_d_stride;
     input_t *Bvar = reinterpret_cast<input_t *>(params.B_ptr) + batch_id * params.B_batch_stride + group_id * params.B_group_stride;
     weight_t *C = reinterpret_cast<weight_t *>(params.C_ptr) + dim_id * kNRows * params.C_d_stride;
@@ -138,6 +157,255 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
     // }
 
     constexpr int kChunkSize = kNThreads * kNItems;
+
+    // Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
+    // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+    // Specialized path for full A matrices - processes entire state vector together
+    if (params.is_full_A_matrix)
+    {
+        // Load full A matrix into shared memory cooperatively
+        // A_full points to A[dim_id, :, :] which is (dstate, dstate), stored row-major
+        __shared__ float A_matrix_shared[MAX_DSTATE * MAX_DSTATE];
+
+        // Load A matrix cooperatively across threads
+        for (int idx = threadIdx.x; idx < params.dstate * params.dstate; idx += blockDim.x)
+        {
+            int i = idx / params.dstate;
+            int j = idx % params.dstate;
+            if (i < params.dstate && j < params.dstate)
+            {
+                // Access A_full[i, j] - need to compute proper index
+                // A_full is (dstate, dstate) with stride params.A_dstate_stride
+                int A_idx = i * params.dstate + j; // Row-major indexing
+                if constexpr (!kIsComplex)
+                {
+                    A_matrix_shared[idx] = float(A_full[A_idx]);
+                }
+                else
+                {
+                    complex_t val = A_full[A_idx];
+                    // Store real part - complex support can be added later
+                    A_matrix_shared[idx] = val.real_;
+                }
+            }
+        }
+        __syncthreads();
+
+        // Shared state vector for this channel (one per block)
+        __shared__ float x_state_shared[MAX_DSTATE];
+        __shared__ float x_state_new[MAX_DSTATE];
+
+        // Initialize state vector
+        if (threadIdx.x < params.dstate)
+        {
+            x_state_shared[threadIdx.x] = 0.0f;
+        }
+        __syncthreads();
+
+        // Process chunks
+        for (int chunk = 0; chunk < params.n_chunks; ++chunk)
+        {
+            input_t u_vals[kNRows][kNItems], delta_vals_load[kNRows][kNItems];
+            __syncthreads();
+#pragma unroll
+            for (int r = 0; r < kNRows; ++r)
+            {
+                if constexpr (!kDirectIO)
+                {
+                    if (r > 0)
+                    {
+                        __syncthreads();
+                    }
+                }
+                load_input<Ktraits>(u + r * params.u_d_stride, u_vals[r], smem_load, params.seqlen - chunk * kChunkSize);
+                if constexpr (!kDirectIO)
+                {
+                    __syncthreads();
+                }
+                load_input<Ktraits>(delta + r * params.delta_d_stride, delta_vals_load[r], smem_load, params.seqlen - chunk * kChunkSize);
+            }
+
+            float delta_vals[kNRows][kNItems], delta_u_vals[kNRows][kNItems], out_vals[kNRows][kNItems];
+#pragma unroll
+            for (int r = 0; r < kNRows; ++r)
+            {
+#pragma unroll
+                for (int i = 0; i < kNItems; ++i)
+                {
+                    float u_val = float(u_vals[r][i]);
+                    delta_vals[r][i] = float(delta_vals_load[r][i]) + delta_bias[r];
+                    if (params.delta_softplus)
+                    {
+                        delta_vals[r][i] = delta_vals[r][i] <= 20.f ? log1pf(expf(delta_vals[r][i])) : delta_vals[r][i];
+                    }
+                    delta_u_vals[r][i] = delta_vals[r][i] * u_val;
+                    out_vals[r][i] = D_val[r] * u_val;
+                }
+            }
+
+            // Feature-SST: Process time steps sequentially with full A matrix operations
+            // For ZOH: x_new = exp(delta * A) @ x_old + delta * B * u
+            // State updates must be sequential, but we parallelize across state dimensions
+            __shared__ float exp_deltaA[MAX_DSTATE * MAX_DSTATE];
+
+            // Process each time step in the chunk sequentially
+            // The loaded u_vals and delta_vals contain kNItems time steps per thread
+            // We need to process all time steps in the chunk
+            int chunk_start = chunk * kChunkSize;
+            int chunk_end = (chunk_start + kChunkSize < params.seqlen) ? (chunk_start + kChunkSize) : params.seqlen;
+            int chunk_len = chunk_end - chunk_start;
+
+            for (int t_local = 0; t_local < chunk_len; ++t_local)
+            {
+                int t_global = chunk_start + t_local;
+
+                // Get delta and u for this time step
+                // u_vals and delta_vals are loaded per thread with kNItems
+                // Map global time step to local item index
+                int thread_id = t_local / kNItems;
+                int item_id = t_local % kNItems;
+
+                float delta_val = 0.0f;
+                float u_val = 0.0f;
+
+                // Broadcast delta and u from the thread that has this time step
+                if (threadIdx.x == thread_id && item_id < kNItems && t_local < chunk_len)
+                {
+                    delta_val = delta_vals[0][item_id];
+                    u_val = float(u_vals[0][item_id]);
+                }
+                // Broadcast to all threads
+                __shared__ float delta_val_shared;
+                __shared__ float u_val_shared;
+                if (threadIdx.x == thread_id)
+                {
+                    delta_val_shared = delta_val;
+                    u_val_shared = u_val;
+                }
+                __syncthreads();
+                delta_val = delta_val_shared;
+                u_val = u_val_shared;
+
+                // Compute exp(delta * A) once per time step (by thread 0)
+                if (threadIdx.x == 0)
+                {
+                    matrix_exp_scaled<float>(A_matrix_shared, exp_deltaA, delta_val, params.dstate, 10);
+                }
+                __syncthreads();
+
+                // Each thread handles one state dimension for matrix-vector multiplication
+                if (threadIdx.x < params.dstate)
+                {
+                    // Compute (exp(delta * A) @ x_old)[threadIdx.x]
+                    float new_state = 0.0f;
+                    for (int j = 0; j < params.dstate; ++j)
+                    {
+                        new_state += exp_deltaA[threadIdx.x * params.dstate + j] * x_state_shared[j];
+                    }
+
+                    // Add delta * B * u term
+                    if constexpr (!kIsVariableB)
+                    {
+                        float B_val = float(B[threadIdx.x * params.B_dstate_stride]);
+                        new_state += delta_val * B_val * u_val;
+                    }
+
+                    x_state_new[threadIdx.x] = new_state;
+                }
+                __syncthreads();
+
+                // Update state
+                if (threadIdx.x < params.dstate)
+                {
+                    x_state_shared[threadIdx.x] = x_state_new[threadIdx.x];
+                }
+                __syncthreads();
+
+                // Compute output: y = C^T @ x + D * u (D*u already in out_vals)
+                // Store output in shared memory for this time step
+                __shared__ float y_vals_shared[kChunkSize];
+                if (threadIdx.x == 0)
+                {
+                    float y_val = 0.0f;
+                    if constexpr (!kIsVariableC)
+                    {
+                        for (int s = 0; s < params.dstate; ++s)
+                        {
+                            y_val += float(C[s * params.C_dstate_stride]) * x_state_shared[s];
+                        }
+                    }
+                    y_vals_shared[t_local] = y_val;
+                }
+                __syncthreads();
+
+                // Accumulate into out_vals for the thread that owns this time step
+                int thread_for_t = t_local / kNItems;
+                int item_for_t = t_local % kNItems;
+                if (threadIdx.x == thread_for_t && item_for_t < kNItems)
+                {
+                    out_vals[0][item_for_t] += y_vals_shared[t_local];
+                }
+            }
+
+            u += kChunkSize;
+            delta += kChunkSize;
+
+            // Store state for this chunk
+            if (threadIdx.x < params.dstate)
+            {
+                int r = 0; // kNRows is 1 for this kernel
+                if constexpr (!kIsComplex)
+                {
+                    x[(r * params.n_chunks + chunk) * params.dstate + threadIdx.x] = make_float2(x_state_shared[threadIdx.x], 0.0f);
+                }
+                else
+                {
+                    x[(r * params.n_chunks + chunk) * params.dstate + threadIdx.x] = make_float4(x_state_shared[threadIdx.x], 0.0f, 0.0f, 0.0f);
+                }
+            }
+
+            // Store output for this chunk
+            input_t *out = reinterpret_cast<input_t *>(params.out_ptr) + batch_id * params.out_batch_stride + dim_id * kNRows * params.out_d_stride + chunk * kChunkSize;
+            __syncthreads();
+#pragma unroll
+            for (int r = 0; r < kNRows; ++r)
+            {
+                if constexpr (!kDirectIO)
+                {
+                    if (r > 0)
+                    {
+                        __syncthreads();
+                    }
+                }
+                store_output<Ktraits>(out + r * params.out_d_stride, out_vals[r], smem_store, params.seqlen - chunk * kChunkSize);
+            }
+
+            if constexpr (kHasZ)
+            {
+                input_t *z = reinterpret_cast<input_t *>(params.z_ptr) + batch_id * params.z_batch_stride + dim_id * kNRows * params.z_d_stride + chunk * kChunkSize;
+                input_t *out_z = reinterpret_cast<input_t *>(params.out_z_ptr) + batch_id * params.out_z_batch_stride + dim_id * kNRows * params.out_z_d_stride + chunk * kChunkSize;
+#pragma unroll
+                for (int r = 0; r < kNRows; ++r)
+                {
+                    input_t z_vals[kNItems];
+                    __syncthreads();
+                    load_input<Ktraits>(z + r * params.z_d_stride, z_vals, smem_load, params.seqlen - chunk * kChunkSize);
+#pragma unroll
+                    for (int i = 0; i < kNItems; ++i)
+                    {
+                        float z_val = z_vals[i];
+                        out_vals[r][i] *= z_val / (1 + expf(-z_val));
+                    }
+                    __syncthreads();
+                    store_output<Ktraits>(out_z + r * params.out_z_d_stride, out_vals[r], smem_store, params.seqlen - chunk * kChunkSize);
+                }
+            }
+        }
+
+        return; // Full A matrix path complete
+    }
+
+    // Original diagonal A path
     for (int chunk = 0; chunk < params.n_chunks; ++chunk)
     {
         input_t u_vals[kNRows][kNItems], delta_vals_load[kNRows][kNItems];
@@ -188,6 +456,7 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
 #pragma unroll
             for (int r = 0; r < kNRows; ++r)
             {
+                // Feature-SST: A is guaranteed to be diagonal here (full A path handled above)
                 A_val_orig[r] = A[state_idx * params.A_dstate_stride + r * params.A_d_stride];
                 A_val[r] = A_val_orig[r];
                 // For ZOH, multiply the real part of A with LOG2E so we can use exp2f instead of expf.

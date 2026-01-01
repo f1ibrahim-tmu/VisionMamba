@@ -98,6 +98,19 @@ void set_ssm_params_fwd(SSMParamsBase &params,
 
     params.is_variable_B = is_variable_B;
     params.is_variable_C = is_variable_C;
+    
+    // Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
+    // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+    // Set full A matrix parameters
+    params.is_full_A_matrix = (A.dim() == 3 && A.size(2) == A.size(1));
+    if (params.is_full_A_matrix) {
+        params.block_size = 4;  // Default, can be made configurable
+        params.low_rank_rank = 2;  // Default, can be made configurable
+    } else {
+        params.block_size = 0;
+        params.low_rank_rank = 0;
+    }
+    params.A_matrix_stride = 0;  // Will be set below
 
     // Set the pointers and strides.
     params.u_ptr = u.data_ptr();
@@ -114,6 +127,10 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     // All stride are in elements, not bytes.
     params.A_d_stride = A.stride(0);
     params.A_dstate_stride = A.stride(1);
+    // Feature-SST: A_matrix_stride for full A matrices
+    // For full A: A is (dim, dstate, dstate), A[dim_id] is a (dstate, dstate) matrix
+    // A_full will point directly to A[dim_id], so stride is 0 (not used)
+    params.A_matrix_stride = 0;
     if (!is_variable_B) {
         params.B_d_stride = B.stride(0);
     } else {

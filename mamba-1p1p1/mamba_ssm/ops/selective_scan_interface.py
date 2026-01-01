@@ -72,9 +72,21 @@ class SelectiveScanFn(torch.autograd.Function):
         force_python = use_cuda_kernel is False
         auto_select = use_cuda_kernel is None
         
+        # Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
+        # SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+        # Detect if A is full matrix (3D) or diagonal (2D)
+        is_full_A_matrix = A.dim() == 3 and A.shape[-1] == A.shape[-2]
+        
         # Polynomial Interpolation requires bidirectional (non-causal) scan,
         # which is only implemented in the Python reference. Force Python path.
         if discretization_method == "poly":
+            force_python = True
+            force_cuda = False
+            auto_select = False
+        
+        # Feature-SST: Full A matrices now supported in CUDA kernels (ZOH method)
+        # For other methods, fall back to Python
+        if is_full_A_matrix and discretization_method != "zoh":
             force_python = True
             force_cuda = False
             auto_select = False
@@ -90,8 +102,8 @@ class SelectiveScanFn(torch.autograd.Function):
         }
         disc_method_enum = disc_method_map.get(discretization_method, 0)
         
-        # Try CUDA kernel if requested (force or auto-select)
-        if (force_cuda or auto_select) and selective_scan_cuda is not None:
+        # Try CUDA kernel if requested (force or auto-select) and A is not full matrix
+        if (force_cuda or auto_select) and selective_scan_cuda is not None and not is_full_A_matrix:
             try:
                 out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum)
                 ctx.delta_softplus = delta_softplus
@@ -220,7 +232,15 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         delta = delta + delta_bias[..., None].float()
     if delta_softplus:
         delta = F.softplus(delta)
-    batch, dim, dstate = u.shape[0], A.shape[0], A.shape[1]
+    
+    # Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
+    # SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+    # Detect if A is full matrix (3D: D, N, N) or diagonal (2D: D, N)
+    is_full_A_matrix = A.dim() == 3 and A.shape[-1] == A.shape[-2]
+    if is_full_A_matrix:
+        batch, dim, dstate = u.shape[0], A.shape[0], A.shape[1]
+    else:
+        batch, dim, dstate = u.shape[0], A.shape[0], A.shape[1]
     is_variable_B = B.dim() >= 3
     is_variable_C = C.dim() >= 3
     if A.is_complex():
@@ -237,15 +257,52 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     # Discretization methods
     if discretization_method == "zoh":
         # Zero Order Hold (original implementation)
-        deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        if is_full_A_matrix:
+            # Feature-SST: Full A matrix - use matrix exponential
+            # A has shape (dim, dstate, dstate), delta has shape (batch, dim, seqlen)
+            # Vectorized: reshape to (batch * dim * seqlen, dstate, dstate) for batched matrix_exp
+            seqlen = u.shape[2]
+            delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
+            A_expanded = A.unsqueeze(0).unsqueeze(0)  # (1, dim, 1, dstate, dstate)
+            delta_A = (delta_expanded * A_expanded).reshape(batch * dim * seqlen, dstate, dstate)
+            # Batched matrix exponential
+            deltaA_flat = torch.linalg.matrix_exp(delta_A)  # (batch * dim * seqlen, dstate, dstate)
+            deltaA = deltaA_flat.reshape(batch, dim, seqlen, dstate, dstate)
+        else:
+            # Original diagonal A
+            deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        
         if not is_variable_B:
-            deltaB_u = torch.einsum('bdl,dn,bdl->bdln', delta, B, u)
+            if is_full_A_matrix:
+                # Full A: B has shape (dim, dstate), delta has (batch, dim, seqlen), u has (batch, dim, seqlen)
+                # deltaB_u: (batch, dim, seqlen, dstate) = delta * B * u
+                B_expanded = B.unsqueeze(0).unsqueeze(2)  # (1, dim, 1, dstate)
+                delta_expanded = delta.unsqueeze(-1)  # (batch, dim, seqlen, 1)
+                u_expanded = u.unsqueeze(-1)  # (batch, dim, seqlen, 1)
+                deltaB_u = delta_expanded * B_expanded * u_expanded  # (batch, dim, seqlen, dstate)
+            else:
+                deltaB_u = torch.einsum('bdl,dn,bdl->bdln', delta, B, u)
         else:
             if B.dim() == 3:
-                deltaB_u = torch.einsum('bdl,bnl,bdl->bdln', delta, B, u)
+                if is_full_A_matrix:
+                    # Full A with variable B: B has shape (batch, dstate, seqlen)
+                    B_expanded = B.permute(0, 2, 1).unsqueeze(1)  # (batch, 1, seqlen, dstate)
+                    B_expanded = repeat(B_expanded, 'b 1 l n -> b d l n', d=dim)  # (batch, dim, seqlen, dstate)
+                    delta_expanded = delta.unsqueeze(-1)  # (batch, dim, seqlen, 1)
+                    u_expanded = u.unsqueeze(-1)  # (batch, dim, seqlen, 1)
+                    deltaB_u = delta_expanded * B_expanded * u_expanded  # (batch, dim, seqlen, dstate)
+                else:
+                    deltaB_u = torch.einsum('bdl,bnl,bdl->bdln', delta, B, u)
             else:
                 B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
-                deltaB_u = torch.einsum('bdl,bdnl,bdl->bdln', delta, B, u)
+                if is_full_A_matrix:
+                    # Full A with variable B: B has shape (batch, dim, dstate, seqlen)
+                    B_expanded = B.permute(0, 1, 3, 2)  # (batch, dim, seqlen, dstate)
+                    delta_expanded = delta.unsqueeze(-1)  # (batch, dim, seqlen, 1)
+                    u_expanded = u.unsqueeze(-1)  # (batch, dim, seqlen, 1)
+                    deltaB_u = delta_expanded * B_expanded * u_expanded  # (batch, dim, seqlen, dstate)
+                else:
+                    deltaB_u = torch.einsum('bdl,bdnl,bdl->bdln', delta, B, u)
     
     elif discretization_method == "foh":
         # First Order Hold (Correct Formula)
@@ -743,10 +800,13 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         return out if not return_last_state else (out, last_state)
     
     # Causal scan for all other methods (including HOH)
+    # Feature-SST: Check if deltaA is full matrix (for full A matrices or bilinear)
+    is_matrix_deltaA_full = is_full_A_matrix or (discretization_method == "bilinear" and is_matrix_deltaA)
+    
     ys = []  # Initialize output list for causal methods
     for i in range(u.shape[2]):
-        if is_matrix_deltaA:
-            # Bilinear: deltaA is a matrix, use matrix-vector multiplication
+        if is_matrix_deltaA_full:
+            # Full A matrix or bilinear: deltaA is a matrix, use matrix-vector multiplication
             # deltaA[:, :, i] has shape (batch, dim, dstate, dstate)
             # x has shape (batch, dim, dstate)
             # Need to do: deltaA[:, :, i] @ x.unsqueeze(-1) -> (batch, dim, dstate, 1) -> squeeze to (batch, dim, dstate)

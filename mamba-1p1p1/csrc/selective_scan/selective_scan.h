@@ -44,8 +44,16 @@ struct SSMParamsBase {
     bool delta_softplus;
     DiscretizationMethod discretization_method;
 
+    // Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A matrix support
+    // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+    // This allows cross-channel dynamics while maintaining computational efficiency
+    bool is_full_A_matrix;  // true if A is (d_inner, d_state, d_state), false if (d_inner, d_state)
+    int block_size;          // Size of blocks in block-diagonal structure (0 if not block-diagonal)
+    int low_rank_rank;       // Rank of low-rank component (0 if not low-rank)
+
     index_t A_d_stride;
     index_t A_dstate_stride;
+    index_t A_matrix_stride;  // New: stride for accessing full A matrices (dstate * dstate)
     index_t B_batch_stride;
     index_t B_d_stride;
     index_t B_dstate_stride;
