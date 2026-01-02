@@ -1,3 +1,6 @@
 {
-  "cmake.sourceDirectory": "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/det/tools/deploy"
+  "cmake.sourceDirectory": "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Projects/VisionMamba/det/tools/deploy",
+  "files.associations": {
+    "type_traits": "cpp"
+  }
 }
