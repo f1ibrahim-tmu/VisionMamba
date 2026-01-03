@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from einops import rearrange, repeat
+from mamba_ssm.modules.stability_enforcement import apply_stability_enforcement, compute_stability_penalty
     
 try:
     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
@@ -60,6 +61,12 @@ class Mamba(nn.Module):
         self.d_model = d_model
         self.d_state = d_state
         self.d_conv = d_conv
+        # Feature-StabEnforce: Stability Enforcement on State Dynamics
+        use_spectral_normalization=False,  # Enable spectral normalization: A ← A / max(1, ρ(A))
+        use_eigenvalue_clamping=False,  # Enable eigenvalue clamping for block matrices
+        use_stability_penalty=False,  # Enable soft penalty loss: L_stab = Σ max(0, ℜ(λ_i(A)) - ε)
+        stability_epsilon=0.01,  # Threshold for stability penalty (ε)
+        stability_penalty_weight=0.1,  # Weight for stability penalty in loss (λ_stab)
         self.expand = expand
         self.d_inner = int(self.expand * self.d_model)
         self.dt_rank = math.ceil(self.d_model / 16) if dt_rank == "auto" else dt_rank
@@ -83,6 +90,12 @@ class Mamba(nn.Module):
 
         self.in_proj = nn.Linear(self.d_model, self.d_inner * 2, bias=bias, **factory_kwargs)
 
+        # Feature-StabEnforce: Stability Enforcement on State Dynamics
+        self.use_spectral_normalization = use_spectral_normalization
+        self.use_eigenvalue_clamping = use_eigenvalue_clamping
+        self.use_stability_penalty = use_stability_penalty
+        self.stability_epsilon = stability_epsilon
+        self.stability_penalty_weight = stability_penalty_weight
         self.conv1d = nn.Conv1d(
             in_channels=self.d_inner,
             out_channels=self.d_inner,
@@ -175,6 +188,34 @@ class Mamba(nn.Module):
             self.D_b._no_weight_decay = True
 
         self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias, **factory_kwargs)
+
+
+    def compute_stability_loss(self, bidirectional=False):
+        """
+        Feature-StabEnforce: Compute stability penalty loss.
+        
+        L_stab = Σ max(0, ℜ(λ_i(A)) - ε)
+        
+        This method computes the stability penalty for the current A matrix.
+        Should be called during training to add to the total loss.
+        
+        Args:
+            bidirectional: If True, compute penalty for bidirectional A matrix
+            
+        Returns:
+            stability_loss: Scalar tensor with stability penalty (0 if use_stability_penalty is False)
+        """
+        if not self.use_stability_penalty:
+            return torch.tensor(0.0, device=next(self.parameters()).device, requires_grad=False)
+        
+        # Get the A matrix (may be diagonal or full)
+        A = self._construct_A_matrix(bidirectional=bidirectional)
+        
+        # Compute stability penalty
+        penalty = compute_stability_penalty(A, epsilon=self.stability_epsilon)
+        
+        # Scale by penalty weight
+        return self.stability_penalty_weight * penalty
 
     def forward(self, hidden_states, inference_params=None):
         """
