@@ -72,6 +72,12 @@ def compare_methods(output_base='./output', batch_size=1):
                 latency = latest.get('latency', {})
                 flops = latest.get('flops')
                 
+                # Handle both old format (number) and new format (dict)
+                if isinstance(flops, dict):
+                    flops_value = flops.get('total', flops.get('base', None))
+                else:
+                    flops_value = flops
+                
                 if latency:
                     throughput = 1000 / latency.get('avg_ms', 1.0)
                 else:
@@ -80,7 +86,7 @@ def compare_methods(output_base='./output', batch_size=1):
                 comparison.append({
                     'Method': method.upper(),
                     'Params (M)': model_info.get('total_params', 0) / 1e6 if model_info else 0,
-                    'FLOPs (B)': flops if flops else None,
+                    'FLOPs (B)': flops_value if flops_value else None,
                     'Latency (ms)': latency.get('avg_ms') if latency else None,
                     'Latency Min (ms)': latency.get('min_ms') if latency else None,
                     'Latency Max (ms)': latency.get('max_ms') if latency else None,
@@ -230,6 +236,12 @@ def compare_all_methods_all_batch_sizes(output_base='./output'):
                 model_info = result.get('model_info', {})
                 flops = result.get('flops')
                 
+                # Handle both old format (number) and new format (dict)
+                if isinstance(flops, dict):
+                    flops_value = flops.get('total', flops.get('base', None))
+                else:
+                    flops_value = flops
+                
                 if latency and latency.get('avg_ms'):
                     throughput = 1000 / latency.get('avg_ms', 1.0)
                 else:
@@ -242,7 +254,7 @@ def compare_all_methods_all_batch_sizes(output_base='./output'):
                     'Latency Min (ms)': latency.get('min_ms') if latency else None,
                     'Latency Max (ms)': latency.get('max_ms') if latency else None,
                     'Throughput (img/s)': throughput,
-                    'FLOPs (B)': flops if flops else None,
+                    'FLOPs (B)': flops_value if flops_value else None,
                     'Params (M)': model_info.get('total_params', 0) / 1e6 if model_info else 0,
                 })
     
