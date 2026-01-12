@@ -170,8 +170,71 @@ def load_model(args):
     return model
 
 
+def estimate_discretization_flops(model, discretization_method, batch_size=1, input_size=224):
+    """
+    Estimate additional FLOPs for discretization methods that profilers miss.
+    
+    The profiler sees the same architecture regardless of discretization method,
+    but different methods have different computational costs in the discretization step.
+    
+    Returns: Additional FLOPs in billions
+    """
+    try:
+        # Extract model dimensions
+        if hasattr(model, 'layers') and len(model.layers) > 0:
+            # Get discretization method from first layer
+            first_layer = model.layers[0]
+            if hasattr(first_layer, 'mixer') and hasattr(first_layer.mixer, 'discretization_method'):
+                discretization_method = first_layer.mixer.discretization_method
+            elif hasattr(first_layer, 'mixer') and hasattr(first_layer.mixer, 'ssm') and hasattr(first_layer.mixer.ssm, 'discretization_method'):
+                discretization_method = first_layer.mixer.ssm.discretization_method
+        
+        # Get model dimensions
+        depth = len(model.layers) if hasattr(model, 'layers') else 24
+        embed_dim = model.embed_dim if hasattr(model, 'embed_dim') else 192
+        d_state = 16  # Default, could extract from model if available
+        num_patches = model.patch_embed.num_patches if hasattr(model, 'patch_embed') else (input_size // 16) ** 2
+        
+        # Sequence length (including cls token if present)
+        seq_len = num_patches
+        if hasattr(model, 'if_cls_token') and model.if_cls_token:
+            seq_len += 1
+        
+        # Base discretization FLOPs per layer (ZOH baseline)
+        # For each layer: delta (B, D, L) × A (D, N) -> (B, D, L, N)
+        # einsum('bdl,dn->bdln') = B * D * L * N operations
+        base_discretization_flops_per_layer = batch_size * embed_dim * seq_len * d_state
+        
+        # Additional FLOPs multipliers for each method (relative to ZOH)
+        # These are rough estimates based on the mathematical operations
+        method_multipliers = {
+            'zoh': 1.0,           # Baseline: exp + einsum
+            'foh': 1.5,           # exp + power operations (delta^2, delta^3, etc.)
+            'bilinear': 2.5,      # Matrix inversions (I + A*delta/2)^-1
+            'poly': 2.0,          # Multiple power operations and matrix multiplications
+            'highorder': 3.0,     # Higher-order Taylor series terms
+            'rk4': 4.0,           # 4 function evaluations per step
+        }
+        
+        multiplier = method_multipliers.get(discretization_method.lower(), 1.0)
+        
+        # Calculate total discretization FLOPs
+        # Additional FLOPs = (multiplier - 1) * base_flops (since base is already counted)
+        additional_flops_per_layer = (multiplier - 1.0) * base_discretization_flops_per_layer
+        total_additional_flops = additional_flops_per_layer * depth
+        
+        # Convert to billions
+        additional_flops_giga = total_additional_flops / 1e9
+        
+        return additional_flops_giga, discretization_method
+        
+    except Exception as e:
+        # If we can't extract, return 0
+        return 0.0, 'unknown'
+
+
 def compute_flops(model, args):
-    """Compute FLOPs for the model using fvcore or thop"""
+    """Compute FLOPs for the model using fvcore or thop, with manual discretization FLOPs"""
     if not FVCORE_AVAILABLE and not THOP_AVAILABLE:
         print("⚠ No FLOPs computation library available, skipping FLOPs computation")
         return None
@@ -182,25 +245,75 @@ def compute_flops(model, args):
         # Create dummy input
         dummy_input = torch.randn(1, 3, args.input_size, args.input_size, device=args.device)
         
+        base_flops_giga = None
+        profiler_name = None
+        
         # Use fvcore if available
         if FVCORE_AVAILABLE and FlopCountAnalyzer is not None:
             flops_analyzer = FlopCountAnalyzer(model, dummy_input)
             total_flops = flops_analyzer.total()
-            flops_giga = total_flops / 1e9
-            print(f"✓ Total FLOPs (fvcore): {flops_giga:.2f} B (Billion)")
-            print(f"✓ FLOPs per image: {flops_giga:.2f} B")
-            return flops_giga
+            base_flops_giga = total_flops / 1e9
+            profiler_name = "fvcore"
         
         # Fall back to thop
         elif THOP_AVAILABLE and thop_profile is not None:
             flops, params = thop_profile(model, inputs=(dummy_input,), verbose=False)
-            flops_giga = flops / 1e9
-            print(f"✓ Total FLOPs (thop): {flops_giga:.2f} B (Billion)")
-            print(f"✓ FLOPs per image: {flops_giga:.2f} B")
-            return flops_giga
+            base_flops_giga = flops / 1e9
+            profiler_name = "thop"
         else:
             print("⚠ FLOPs computation libraries not properly initialized")
             return None
+        
+        # Extract discretization method and estimate additional FLOPs
+        discretization_method = None
+        if hasattr(model, 'layers') and len(model.layers) > 0:
+            first_layer = model.layers[0]
+            if hasattr(first_layer, 'mixer'):
+                if hasattr(first_layer.mixer, 'discretization_method'):
+                    discretization_method = first_layer.mixer.discretization_method
+                elif hasattr(first_layer.mixer, 'ssm') and hasattr(first_layer.mixer.ssm, 'discretization_method'):
+                    discretization_method = first_layer.mixer.ssm.discretization_method
+        
+        # If we can't find it, try to infer from model name
+        if discretization_method is None:
+            model_name_lower = args.model.lower()
+            if 'rk4' in model_name_lower:
+                discretization_method = 'rk4'
+            elif 'foh' in model_name_lower:
+                discretization_method = 'foh'
+            elif 'bilinear' in model_name_lower:
+                discretization_method = 'bilinear'
+            elif 'poly' in model_name_lower:
+                discretization_method = 'poly'
+            elif 'highorder' in model_name_lower:
+                discretization_method = 'highorder'
+            else:
+                discretization_method = 'zoh'
+        
+        # Estimate additional discretization FLOPs
+        additional_flops_giga, detected_method = estimate_discretization_flops(
+            model, discretization_method, batch_size=1, input_size=args.input_size
+        )
+        
+        # Total FLOPs = base (from profiler) + additional (from discretization)
+        total_flops_giga = base_flops_giga + additional_flops_giga
+        
+        print(f"✓ Base FLOPs ({profiler_name}): {base_flops_giga:.4f} B (Billion)")
+        if additional_flops_giga > 0:
+            print(f"✓ Additional discretization FLOPs ({detected_method.upper()}): {additional_flops_giga:.4f} B (Billion)")
+            print(f"✓ Total FLOPs (with discretization): {total_flops_giga:.4f} B (Billion)")
+        else:
+            print(f"✓ Total FLOPs: {total_flops_giga:.4f} B (Billion)")
+        print(f"✓ FLOPs per image: {total_flops_giga:.4f} B")
+        
+        # Return dictionary with detailed FLOPs breakdown
+        return {
+            'total': total_flops_giga,
+            'base': base_flops_giga,
+            'additional_discretization': additional_flops_giga,
+            'discretization_method': detected_method,
+            'profiler': profiler_name
+        }
             
     except Exception as e:
         print(f"✗ Error computing FLOPs: {e}")
@@ -341,7 +454,16 @@ def print_summary(results):
     
     if 'flops' in results and results['flops']:
         print(f"\nComputational Complexity:")
-        print(f" - FLOPs: {results['flops']:.2f} B (Billion)")
+        if isinstance(results['flops'], dict):
+            # Detailed FLOPs breakdown
+            flops_info = results['flops']
+            print(f" - Base FLOPs ({flops_info.get('profiler', 'profiler')}): {flops_info.get('base', 0):.4f} B")
+            if flops_info.get('additional_discretization', 0) > 0:
+                print(f" - Additional Discretization FLOPs ({flops_info.get('discretization_method', 'unknown').upper()}): {flops_info.get('additional_discretization', 0):.4f} B")
+            print(f" - Total FLOPs: {flops_info.get('total', 0):.4f} B (Billion)")
+        else:
+            # Legacy format (just a number)
+            print(f" - FLOPs: {results['flops']:.2f} B (Billion)")
     
     if 'latency' in results:
         lat = results['latency']
