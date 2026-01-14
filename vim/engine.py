@@ -78,6 +78,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                 loss = loss + 0.25 * criterion(outputs[1], targets) 
                 loss = loss + 0.25 * criterion(outputs[0], outputs[1].detach().sigmoid())
                 loss = loss + 0.25 * criterion(outputs[1], outputs[0].detach().sigmoid()) 
+            
+            # Feature-StabEnforce: Compute stability loss from all Mamba layers
+            if args.use_stability_penalty:
+                stability_loss = torch.tensor(0.0, device=loss.device)
+                for module in model.modules():
+                    if hasattr(module, 'compute_stability_loss'):
+                        stability_loss = stability_loss + module.compute_stability_loss()
+                loss = loss + stability_loss
+                metric_logger.update(stab_loss=stability_loss.item())
 
         if args.if_nan2num:
             with amp_autocast():

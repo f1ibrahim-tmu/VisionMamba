@@ -57,6 +57,18 @@ def get_args_parser():
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
 
+    # Feature-StabEnforce: Stability Enforcement parameters
+    parser.add_argument('--use-spectral-normalization', action='store_true', default=False,
+                        help='Enable spectral normalization: A ← A / max(1, ρ(A))')
+    parser.add_argument('--use-eigenvalue-clamping', action='store_true', default=False,
+                        help='Enable eigenvalue clamping for block matrices')
+    parser.add_argument('--use-stability-penalty', action='store_true', default=False,
+                        help='Enable stability penalty loss: L_stab = Σ max(0, ℜ(λ_i(A)) - ε)')
+    parser.add_argument('--stability-epsilon', type=float, default=0.01,
+                        help='Threshold for stability penalty (ε) (default: 0.01)')
+    parser.add_argument('--stability-penalty-weight', type=float, default=0.1,
+                        help='Weight for stability penalty in loss (λ_stab) (default: 0.1)')
+
     parser.add_argument('--model-ema', action='store_true')
     parser.add_argument('--no-model-ema', action='store_false', dest='model_ema')
     parser.set_defaults(model_ema=True)
@@ -328,6 +340,21 @@ def main(args):
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
     print(f"Creating model: {args.model}")
+    
+    # Feature-StabEnforce: Build ssm_cfg with stability enforcement parameters
+    ssm_cfg = {}
+    if args.use_spectral_normalization or args.use_eigenvalue_clamping or args.use_stability_penalty:
+        ssm_cfg = {
+            'use_spectral_normalization': args.use_spectral_normalization,
+            'use_eigenvalue_clamping': args.use_eigenvalue_clamping,
+            'use_stability_penalty': args.use_stability_penalty,
+            'stability_epsilon': args.stability_epsilon,
+            'stability_penalty_weight': args.stability_penalty_weight,
+        }
+        print(f"Stability enforcement enabled: SN={args.use_spectral_normalization}, "
+              f"EC={args.use_eigenvalue_clamping}, SP={args.use_stability_penalty}, "
+              f"ε={args.stability_epsilon}, λ={args.stability_penalty_weight}")
+    
     model = create_model(
         args.model,
         pretrained=False,
@@ -335,7 +362,8 @@ def main(args):
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
         drop_block_rate=None,
-        img_size=args.input_size
+        img_size=args.input_size,
+        ssm_cfg=ssm_cfg if ssm_cfg else None
     )
 
                     
