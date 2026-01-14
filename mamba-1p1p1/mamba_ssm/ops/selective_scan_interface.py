@@ -46,7 +46,8 @@ class SelectiveScanFn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
+                return_last_state=False, discretization_method="zoh", use_cuda_kernel=None,
+                A_blocks=None, A_U=None, A_V=None, block_size=0, low_rank_rank=0):
         if u.stride(-1) != 1:
             u = u.contiguous()
         if delta.stride(-1) != 1:
@@ -77,6 +78,10 @@ class SelectiveScanFn(torch.autograd.Function):
         # Detect if A is full matrix (3D) or diagonal (2D)
         is_full_A_matrix = A.dim() == 3 and A.shape[-1] == A.shape[-2]
         
+        # Check if structured components are provided (block-diagonal + low-rank)
+        use_structured_A = (A_blocks is not None and A_U is not None and A_V is not None 
+                            and block_size > 0 and low_rank_rank > 0)
+        
         # Polynomial Interpolation requires bidirectional (non-causal) scan,
         # which is only implemented in the Python reference. Force Python path.
         if discretization_method == "poly":
@@ -86,7 +91,8 @@ class SelectiveScanFn(torch.autograd.Function):
         
         # Feature-SST: Full A matrices now supported in CUDA kernels (ZOH method)
         # For other methods, fall back to Python
-        if is_full_A_matrix and discretization_method != "zoh":
+        # If structured components are provided, we can use optimized CUDA path
+        if is_full_A_matrix and discretization_method != "zoh" and not use_structured_A:
             force_python = True
             force_cuda = False
             auto_select = False
@@ -102,20 +108,43 @@ class SelectiveScanFn(torch.autograd.Function):
         }
         disc_method_enum = disc_method_map.get(discretization_method, 0)
         
-        # Try CUDA kernel if requested (force or auto-select) and A is not full matrix
-        if (force_cuda or auto_select) and selective_scan_cuda is not None and not is_full_A_matrix:
+        # Try CUDA kernel if requested (force or auto-select)
+        # Support both diagonal A, full A matrix, and structured A (block-diagonal + low-rank)
+        can_use_cuda = (selective_scan_cuda is not None and 
+                        (not is_full_A_matrix or use_structured_A or discretization_method == "zoh"))
+        if (force_cuda or auto_select) and can_use_cuda:
             try:
-                out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum)
+                # Pass structured components if available
+                if use_structured_A:
+                    # Convert A_blocks list to tensor for CUDA
+                    # A_blocks is a list of (d_inner, block_size, block_size) tensors
+                    # We need to stack them: (d_inner, num_blocks, block_size, block_size)
+                    num_blocks = len(A_blocks)
+                    A_blocks_tensor = torch.stack([block for block in A_blocks], dim=1)  # (d_inner, num_blocks, block_size, block_size)
+                    # Ensure A_U and A_V are contiguous and on the same device
+                    A_U_contig = A_U.contiguous() if not A_U.is_contiguous() else A_U
+                    A_V_contig = A_V.contiguous() if not A_V.is_contiguous() else A_V
+                    out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum,
+                                                           A_blocks_tensor, A_U_contig, A_V_contig, block_size, low_rank_rank)
+                else:
+                    # Pass None for structured components
+                    out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum,
+                                                           None, None, None, 0, 0)
                 ctx.delta_softplus = delta_softplus
                 ctx.has_z = z is not None
                 ctx.discretization_method = discretization_method
                 ctx.use_cuda_kernel = True
+                ctx.use_structured_A = use_structured_A
                 last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
                 if not ctx.has_z:
                     ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x)
+                    if use_structured_A:
+                        ctx.save_for_backward(u, delta, A, B, C, D, delta_bias, x, *A_blocks, A_U, A_V)
                     return out if not return_last_state else (out, last_state)
                 else:
                     ctx.save_for_backward(u, delta, A, B, C, D, z, delta_bias, x, out)
+                    if use_structured_A:
+                        ctx.save_for_backward(u, delta, A, B, C, D, z, delta_bias, x, out, *A_blocks, A_U, A_V)
                     out_z = rest[0]
                     return out_z if not return_last_state else (out_z, last_state)
             except Exception as e:
@@ -136,11 +165,7 @@ class SelectiveScanFn(torch.autograd.Function):
         ctx.has_z = z is not None
         ctx.discretization_method = discretization_method
         ctx.use_cuda_kernel = False
-        if not return_last_state:
-            return result
-        else:
-            out, last_state = result
-            return out, last_state
+        ctx.use_structured_A = False
         if not return_last_state:
             return result
         else:
@@ -183,7 +208,8 @@ class SelectiveScanFn(torch.autograd.Function):
 
 
 def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                     return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
+                     return_last_state=False, discretization_method="zoh", use_cuda_kernel=None,
+                     A_blocks=None, A_U=None, A_V=None, block_size=0, low_rank_rank=0):
     """if return_last_state is True, returns (out, last_state)
     last_state has shape (batch, dim, dstate). Note that the gradient of the last state is
     not considered in the backward pass.
@@ -200,8 +226,13 @@ def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_
             If True: Force use of CUDA kernel (if available)
             If False: Force use of Python reference implementation
             If None: Auto-select (try CUDA first, fallback to Python)
+        A_blocks: Optional list of tensors for block-diagonal structure
+        A_U: Optional tensor for low-rank U component
+        A_V: Optional tensor for low-rank V component
+        block_size: Size of blocks in block-diagonal structure
+        low_rank_rank: Rank of low-rank component
     """
-    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method, use_cuda_kernel)
+    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method, use_cuda_kernel, A_blocks, A_U, A_V, block_size, low_rank_rank)
 
 
 def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,

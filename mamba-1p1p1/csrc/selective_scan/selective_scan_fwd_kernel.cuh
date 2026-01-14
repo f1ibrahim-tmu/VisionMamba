@@ -109,10 +109,23 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
 
     // Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
     // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
-    // Handle full A matrices differently
+    // Handle full A matrices and structured A differently
     weight_t *A = nullptr;
     weight_t *A_full = nullptr; // Full A matrix pointer
-    if (params.is_full_A_matrix)
+    float *A_blocks_ptr = nullptr; // Block-diagonal components
+    float *A_U_ptr = nullptr; // Low-rank U component
+    float *A_V_ptr = nullptr; // Low-rank V component
+    
+    if (params.use_structured_A)
+    {
+        // Structured A: A_blocks is (d_inner, num_blocks, block_size, block_size)
+        // A_U is (d_inner, d_state, low_rank_rank)
+        // A_V is (d_inner, d_state, low_rank_rank)
+        A_blocks_ptr = reinterpret_cast<float *>(params.A_blocks_ptr) + dim_id * params.A_block_stride;
+        A_U_ptr = reinterpret_cast<float *>(params.A_U_ptr) + dim_id * params.A_U_stride;
+        A_V_ptr = reinterpret_cast<float *>(params.A_V_ptr) + dim_id * params.A_V_stride;
+    }
+    else if (params.is_full_A_matrix)
     {
         // A is (dim, d_state, d_state) - full matrix, stored row-major per channel
         // A[dim_id] is a (dstate, dstate) matrix
@@ -551,11 +564,258 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                             if (threadIdx.x * kNItems + i >= params.seqlen - chunk * kChunkSize)
                             {
                                 thread_data[i] = make_float2(1.f, 0.f);
-                            }
+            }
+        }
+    }
+    else if (params.use_structured_A)
+    {
+        // Feature-SST: Optimized path using block-diagonal + low-rank structure
+        // A = blockdiag(A_1, ..., A_K) + UV^T
+        // We use optimized operations to avoid constructing full matrix
+        
+        // Load structured components into shared memory
+        // A_blocks: (num_blocks, block_size, block_size) for this dim_id
+        // A_U: (d_state, low_rank_rank) for this dim_id
+        // A_V: (d_state, low_rank_rank) for this dim_id
+        __shared__ float A_blocks_shared[16 * 16 * 16]; // Max: 16 blocks * 16x16 each
+        __shared__ float A_U_shared[MAX_DSTATE * 16]; // Max: d_state=256, rank=16
+        __shared__ float A_V_shared[MAX_DSTATE * 16];
+        
+        // Load A_blocks cooperatively
+        int total_block_elements = params.num_blocks * params.block_size * params.block_size;
+        for (int idx = threadIdx.x; idx < total_block_elements; idx += blockDim.x)
+        {
+            int block_idx = idx / (params.block_size * params.block_size);
+            int block_offset = idx % (params.block_size * params.block_size);
+            int i = block_offset / params.block_size;
+            int j = block_offset % params.block_size;
+            if (block_idx < params.num_blocks && i < params.block_size && j < params.block_size)
+            {
+                // A_blocks is stored as (d_inner, num_blocks, block_size, block_size)
+                // Access: A_blocks_ptr[block_idx * (block_size * block_size) + i * block_size + j]
+                int A_blocks_idx = block_idx * params.block_size * params.block_size + i * params.block_size + j;
+                A_blocks_shared[idx] = A_blocks_ptr[A_blocks_idx];
+            }
+        }
+        
+        // Load A_U and A_V cooperatively
+        int U_elements = params.dstate * params.low_rank_rank;
+        int V_elements = params.dstate * params.low_rank_rank;
+        for (int idx = threadIdx.x; idx < U_elements; idx += blockDim.x)
+        {
+            A_U_shared[idx] = A_U_ptr[idx];
+        }
+        for (int idx = threadIdx.x; idx < V_elements; idx += blockDim.x)
+        {
+            A_V_shared[idx] = A_V_ptr[idx];
+        }
+        __syncthreads();
+        
+        // Shared state vector
+        __shared__ float x_state_shared[MAX_DSTATE];
+        __shared__ float x_state_new[MAX_DSTATE];
+        
+        // Initialize state vector
+        if (threadIdx.x < params.dstate)
+        {
+            x_state_shared[threadIdx.x] = 0.0f;
+        }
+        __syncthreads();
+        
+        // Process chunks
+        for (int chunk = 0; chunk < params.n_chunks; ++chunk)
+        {
+            input_t u_vals[kNRows][kNItems], delta_vals_load[kNRows][kNItems];
+            __syncthreads();
+#pragma unroll
+            for (int r = 0; r < kNRows; ++r)
+            {
+                if constexpr (!kDirectIO)
+                {
+                    if (r > 0)
+                    {
+                        __syncthreads();
+                    }
+                }
+                load_input<Ktraits>(u + r * params.u_d_stride, u_vals[r], smem_load, params.seqlen - chunk * kChunkSize);
+                if constexpr (!kDirectIO)
+                {
+                    __syncthreads();
+                }
+                load_input<Ktraits>(delta + r * params.delta_d_stride, delta_vals_load[r], smem_load, params.seqlen - chunk * kChunkSize);
+            }
+            
+            float delta_vals[kNRows][kNItems], delta_u_vals[kNRows][kNItems], out_vals[kNRows][kNItems];
+#pragma unroll
+            for (int r = 0; r < kNRows; ++r)
+            {
+#pragma unroll
+                for (int i = 0; i < kNItems; ++i)
+                {
+                    float u_val = float(u_vals[r][i]);
+                    delta_vals[r][i] = float(delta_vals_load[r][i]) + delta_bias[r];
+                    if (params.delta_softplus)
+                    {
+                        delta_vals[r][i] = delta_vals[r][i] <= 20.f ? log1pf(expf(delta_vals[r][i])) : delta_vals[r][i];
+                    }
+                    delta_u_vals[r][i] = delta_vals[r][i] * u_val;
+                    out_vals[r][i] = D_val[r] * u_val;
+                }
+            }
+            
+            // Feature-SST: No need to store full exp_deltaA matrix!
+            // We compute exp(delta * A) @ x directly from structured components
+            
+            int chunk_start = chunk * kChunkSize;
+            int chunk_end = (chunk_start + kChunkSize < params.seqlen) ? (chunk_start + kChunkSize) : params.seqlen;
+            int chunk_len = chunk_end - chunk_start;
+            
+            for (int t_local = 0; t_local < chunk_len; ++t_local)
+            {
+                int t_global = chunk_start + t_local;
+                int thread_id = t_local / kNItems;
+                int item_id = t_local % kNItems;
+                
+                float delta_val = 0.0f;
+                float u_val = 0.0f;
+                
+                if (threadIdx.x == thread_id && item_id < kNItems && t_local < chunk_len)
+                {
+                    delta_val = delta_vals[0][item_id];
+                    u_val = float(u_vals[0][item_id]);
+                }
+                __shared__ float delta_val_shared;
+                __shared__ float u_val_shared;
+                if (threadIdx.x == thread_id)
+                {
+                    delta_val_shared = delta_val;
+                    u_val_shared = u_val;
+                }
+                __syncthreads();
+                delta_val = delta_val_shared;
+                u_val = u_val_shared;
+                
+                // Feature-SST: Optimized matrix-vector multiplication using block-diagonal + low-rank structure
+                // Compute exp(delta * (blockdiag + UV^T)) @ x_old directly from structured components
+                // This avoids storing the full exp_deltaA matrix in memory!
+                if (threadIdx.x < params.dstate)
+                {
+                    // Compute exp(delta * A) @ x_old using optimized structured operations
+                    float expA_x[MAX_DSTATE];
+                    block_diagonal_lowrank_exp_matrix_vector_mult<float>(
+                        A_blocks_shared,      // Block matrices
+                        A_U_shared,          // Low-rank U
+                        A_V_shared,          // Low-rank V
+                        x_state_shared,      // Input: x_old
+                        expA_x,              // Output: exp(delta * A) @ x_old
+                        delta_val,           // Scaling factor
+                        params.dstate,       // State dimension
+                        params.block_size,   // Block size
+                        params.num_blocks,   // Number of blocks
+                        params.low_rank_rank, // Low-rank rank
+                        10,                  // Taylor series terms
+                        true                 // Use first-order approximation for small delta
+                    );
+                    
+                    // Get result for this thread's state dimension
+                    float new_state = expA_x[threadIdx.x];
+                    
+                    // Add delta * B * u term
+                    if constexpr (!kIsVariableB)
+                    {
+                        float B_val = float(B[threadIdx.x * params.B_dstate_stride]);
+                        new_state += delta_val * B_val * u_val;
+                    }
+                    
+                    x_state_new[threadIdx.x] = new_state;
+                }
+                __syncthreads();
+                
+                if (threadIdx.x < params.dstate)
+                {
+                    x_state_shared[threadIdx.x] = x_state_new[threadIdx.x];
+                }
+                __syncthreads();
+                
+                __shared__ float y_vals_shared[kChunkSize];
+                if (threadIdx.x == 0)
+                {
+                    float y_val = 0.0f;
+                    if constexpr (!kIsVariableC)
+                    {
+                        for (int s = 0; s < params.dstate; ++s)
+                        {
+                            y_val += float(C[s * params.C_dstate_stride]) * x_state_shared[s];
                         }
                     }
-                    else
+                    y_vals_shared[t_local] = y_val;
+                }
+                __syncthreads();
+                
+                int thread_for_t = t_local / kNItems;
+                int item_for_t = t_local % kNItems;
+                if (threadIdx.x == thread_for_t && item_for_t < kNItems)
+                {
+                    out_vals[0][item_for_t] += y_vals_shared[t_local];
+                }
+            }
+            
+            u += kChunkSize;
+            delta += kChunkSize;
+            
+            if (threadIdx.x < params.dstate)
+            {
+                int r = 0;
+                if constexpr (!kIsComplex)
+                {
+                    x[(r * params.n_chunks + chunk) * params.dstate + threadIdx.x] = make_float2(x_state_shared[threadIdx.x], 0.0f);
+                }
+                else
+                {
+                    x[(r * params.n_chunks + chunk) * params.dstate + threadIdx.x] = make_float4(x_state_shared[threadIdx.x], 0.0f, 0.0f, 0.0f);
+                }
+            }
+            
+            input_t *out = reinterpret_cast<input_t *>(params.out_ptr) + batch_id * params.out_batch_stride + dim_id * kNRows * params.out_d_stride + chunk * kChunkSize;
+            __syncthreads();
+#pragma unroll
+            for (int r = 0; r < kNRows; ++r)
+            {
+                if constexpr (!kDirectIO)
+                {
+                    if (r > 0)
                     {
+                        __syncthreads();
+                    }
+                }
+                store_output<Ktraits>(out + r * params.out_d_stride, out_vals[r], smem_store, params.seqlen - chunk * kChunkSize);
+            }
+            
+            if constexpr (kHasZ)
+            {
+                input_t *z = reinterpret_cast<input_t *>(params.z_ptr) + batch_id * params.z_batch_stride + dim_id * kNRows * params.z_d_stride + chunk * kChunkSize;
+                input_t *out_z = reinterpret_cast<input_t *>(params.out_z_ptr) + batch_id * params.out_z_batch_stride + dim_id * kNRows * params.out_z_d_stride + chunk * kChunkSize;
+#pragma unroll
+                for (int r = 0; r < kNRows; ++r)
+                {
+                    input_t z_vals[kNItems];
+                    __syncthreads();
+                    load_input<Ktraits>(z + r * params.z_d_stride, z_vals, smem_load, params.seqlen - chunk * kChunkSize);
+#pragma unroll
+                    for (int i = 0; i < kNItems; ++i)
+                    {
+                        float z_val = z_vals[i];
+                        out_vals[r][i] *= z_val / (1 + expf(-z_val));
+                    }
+                    __syncthreads();
+                    store_output<Ktraits>(out_z + r * params.out_z_d_stride, out_vals[r], smem_store, params.seqlen - chunk * kChunkSize);
+                }
+            }
+        }
+        return; // Early return for structured A path
+    }
+    else
+    {
                         // Complex case
                         weight_t B_val_actual;
                         if constexpr (!kIsVariableB)

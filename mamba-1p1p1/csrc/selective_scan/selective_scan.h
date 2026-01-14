@@ -47,12 +47,17 @@ struct SSMParamsBase {
     // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
     // This allows cross-channel dynamics while maintaining computational efficiency
     bool is_full_A_matrix;  // true if A is (d_inner, d_state, d_state), false if (d_inner, d_state)
+    bool use_structured_A;  // true if using block-diagonal + low-rank structure (A_blocks, A_U, A_V)
     int block_size;          // Size of blocks in block-diagonal structure (0 if not block-diagonal)
     int low_rank_rank;       // Rank of low-rank component (0 if not low-rank)
+    int num_blocks;          // Number of blocks (d_state / block_size)
 
     index_t A_d_stride;
     index_t A_dstate_stride;
     index_t A_matrix_stride;  // New: stride for accessing full A matrices (dstate * dstate)
+    index_t A_block_stride;  // Stride for A_blocks: (d_inner, num_blocks, block_size, block_size)
+    index_t A_U_stride;      // Stride for A_U: (d_inner, d_state, low_rank_rank)
+    index_t A_V_stride;      // Stride for A_V: (d_inner, d_state, low_rank_rank)
     index_t B_batch_stride;
     index_t B_d_stride;
     index_t B_dstate_stride;
@@ -84,6 +89,10 @@ struct SSMParamsBase {
     void *__restrict__ x_ptr;
     void *__restrict__ z_ptr;
     void *__restrict__ out_z_ptr;
+    // Feature-SST: Block-diagonal + low-rank A components
+    void *__restrict__ A_blocks_ptr;  // (d_inner, num_blocks, block_size, block_size)
+    void *__restrict__ A_U_ptr;       // (d_inner, d_state, low_rank_rank)
+    void *__restrict__ A_V_ptr;       // (d_inner, d_state, low_rank_rank)
 };
 
 struct SSMParamsBwd: public SSMParamsBase {

@@ -102,12 +102,24 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
     // Set full A matrix parameters
     params.is_full_A_matrix = (A.dim() == 3 && A.size(2) == A.size(1));
-    if (params.is_full_A_matrix) {
+    
+    // Check if structured components are provided
+    bool use_structured_A = (A_blocks_.has_value() && A_U_.has_value() && A_V_.has_value() 
+                              && block_size > 0 && low_rank_rank > 0);
+    params.use_structured_A = use_structured_A;
+    
+    if (use_structured_A) {
+        params.block_size = block_size;
+        params.low_rank_rank = low_rank_rank;
+        params.num_blocks = dstate / block_size;
+    } else if (params.is_full_A_matrix) {
         params.block_size = 4;  // Default, can be made configurable
         params.low_rank_rank = 2;  // Default, can be made configurable
+        params.num_blocks = 0;
     } else {
         params.block_size = 0;
         params.low_rank_rank = 0;
+        params.num_blocks = 0;
     }
     params.A_matrix_stride = 0;  // Will be set below
 
@@ -123,6 +135,26 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     params.x_ptr = x_ptr;
     params.z_ptr = has_z ? z.data_ptr() : nullptr;
     params.out_z_ptr = has_z ? out_z.data_ptr() : nullptr;
+    
+    // Feature-SST: Set structured A component pointers if available
+    if (use_structured_A) {
+        auto A_blocks = A_blocks_.value();
+        auto A_U = A_U_.value();
+        auto A_V = A_V_.value();
+        params.A_blocks_ptr = A_blocks.data_ptr();
+        params.A_U_ptr = A_U.data_ptr();
+        params.A_V_ptr = A_V.data_ptr();
+        params.A_block_stride = A_blocks.stride(0);  // d_inner stride
+        params.A_U_stride = A_U.stride(0);  // d_inner stride
+        params.A_V_stride = A_V.stride(0);  // d_inner stride
+    } else {
+        params.A_blocks_ptr = nullptr;
+        params.A_U_ptr = nullptr;
+        params.A_V_ptr = nullptr;
+        params.A_block_stride = 0;
+        params.A_U_stride = 0;
+        params.A_V_stride = 0;
+    }
     // All stride are in elements, not bytes.
     params.A_d_stride = A.stride(0);
     params.A_dstate_stride = A.stride(1);
@@ -248,7 +280,12 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &z_,
                   const c10::optional<at::Tensor> &delta_bias_,
                   bool delta_softplus,
-                  int discretization_method = 0) {
+                  int discretization_method = 0,
+                  const c10::optional<at::Tensor> &A_blocks_ = c10::nullopt,
+                  const c10::optional<at::Tensor> &A_U_ = c10::nullopt,
+                  const c10::optional<at::Tensor> &A_V_ = c10::nullopt,
+                  int block_size = 0,
+                  int low_rank_rank = 0) {
     auto input_type = u.scalar_type();
     auto weight_type = A.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);

@@ -383,6 +383,12 @@ class Mamba(nn.Module):
         UVT = torch.bmm(A_U, A_V.transpose(-2, -1))  # (d_inner, d_state, d_state)
         A_full = A_full + UVT
         
+        # Store structured components for efficient CUDA kernel usage
+        # These will be used by CUDA kernels to avoid constructing full matrix
+        self._A_blocks_structured = A_blocks
+        self._A_U_structured = A_U
+        self._A_V_structured = A_V
+        
         # Return full matrix for new kernels, diagonal for backward compatibility
         # Check if we should return full matrix (when use_full_A_matrix is True)
         if hasattr(self, 'use_full_A_matrix') and self.use_full_A_matrix:
@@ -523,6 +529,19 @@ class Mamba(nn.Module):
             B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
             C = rearrange(C, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
             assert self.activation in ["silu", "swish"]
+            # Feature-SST: Pass structured components if available for optimized CUDA kernel
+            A_blocks = None
+            A_U = None
+            A_V = None
+            block_size = 0
+            low_rank_rank = 0
+            if (hasattr(self, 'use_block_diagonal_lowrank') and self.use_block_diagonal_lowrank and
+                hasattr(self, '_A_blocks_structured') and self._A_blocks_structured is not None):
+                A_blocks = self._A_blocks_structured
+                A_U = self._A_U_structured
+                A_V = self._A_V_structured
+                block_size = self.block_size
+                low_rank_rank = self.low_rank_rank
             y = selective_scan_fn(
                 x,
                 dt,
@@ -536,6 +555,11 @@ class Mamba(nn.Module):
                 return_last_state=ssm_state is not None,
                 discretization_method=self.discretization_method,  # Pass the discretization method
                 use_cuda_kernel=self.use_cuda_kernel,  # Pass the CUDA kernel preference
+                A_blocks=A_blocks,  # Pass structured components
+                A_U=A_U,
+                A_V=A_V,
+                block_size=block_size,
+                low_rank_rank=low_rank_rank,
             )
             if ssm_state is not None:
                 y, last_state = y
