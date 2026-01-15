@@ -115,10 +115,10 @@ struct SSMParamsBwd: public SSMParamsBase {
     index_t ddelta_batch_stride;
     index_t ddelta_d_stride;
 
-    // Feature-SST: Strides for structured A gradient tensors
-    index_t dA_blocks_stride;  // Stride for dA_blocks: (d_inner, num_blocks, block_size, block_size)
-    index_t dA_U_stride;       // Stride for dA_U: (d_inner, d_state, low_rank_rank)
-    index_t dA_V_stride;       // Stride for dA_V: (d_inner, d_state, low_rank_rank)
+    // Feature-SST: Strides for structured A gradients
+    index_t dA_blocks_stride;  // For (d_inner, num_blocks, block_size, block_size)
+    index_t dA_U_stride;       // For (d_inner, d_state, low_rank_rank)
+    index_t dA_V_stride;       // For (d_inner, d_state, low_rank_rank)
 
     // Common data pointers.
     void *__restrict__ dout_ptr;
@@ -130,9 +130,42 @@ struct SSMParamsBwd: public SSMParamsBase {
     void *__restrict__ dz_ptr;
     void *__restrict__ ddelta_ptr;
     void *__restrict__ ddelta_bias_ptr;
+
+    // Feature-SST: Gradient pointers for structured A components
+    void *__restrict__ dA_blocks_ptr;  // Gradient for A_blocks
+    void *__restrict__ dA_U_ptr;       // Gradient for A_U
+    void *__restrict__ dA_V_ptr;       // Gradient for A_V
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Feature-SST: Bidirectional Mamba support parameters
+struct SSMParamsBidirectional: public SSMParamsBase {
+    // Backward direction A matrix components
+    bool use_structured_A_b;  // Use structured A for backward direction
+    int block_size_b;
+    int low_rank_rank_b;
+    int num_blocks_b;
     
-    // Feature-SST: Block-diagonal + low-rank A gradient pointers
-    void *__restrict__ dA_blocks_ptr;  // (d_inner, num_blocks, block_size, block_size)
-    void *__restrict__ dA_U_ptr;       // (d_inner, d_state, low_rank_rank)
-    void *__restrict__ dA_V_ptr;       // (d_inner, d_state, low_rank_rank)
+    index_t A_b_d_stride;
+    index_t A_b_dstate_stride;
+    index_t A_b_block_stride;
+    index_t A_b_U_stride;
+    index_t A_b_V_stride;
+    
+    // Backward direction pointers
+    void *__restrict__ A_b_ptr;        // Backward A (if diagonal)
+    void *__restrict__ A_b_blocks_ptr; // Backward A blocks
+    void *__restrict__ A_b_U_ptr;      // Backward A low-rank U
+    void *__restrict__ A_b_V_ptr;      // Backward A low-rank V
+    void *__restrict__ B_b_ptr;        // Backward B
+    void *__restrict__ C_b_ptr;        // Backward C
+    
+    // Output pointers for bidirectional
+    void *__restrict__ out_fwd_ptr;    // Forward pass output
+    void *__restrict__ out_bwd_ptr;    // Backward pass output
+    void *__restrict__ x_bwd_ptr;      // Backward state storage
+    
+    // Combination method
+    bool concat_bidirectional;  // true = concatenate, false = add
 };

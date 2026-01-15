@@ -1,12 +1,23 @@
 /******************************************************************************
  ******************************************************************************/
 
+/******************************************************************************
+ * Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
+ * 
+ * SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+ * C++ interface with full support for structured A matrices,
+ * all 6 discretization methods, complex numbers, and backward pass.
+ ******************************************************************************/
+
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
 #include <vector>
 
 #include "selective_scan.h"
+
+namespace py = pybind11;
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
@@ -79,7 +90,13 @@ void set_ssm_params_fwd(SSMParamsBase &params,
                         void* x_ptr,
                         bool has_z,
                         bool delta_softplus,
-                        DiscretizationMethod discretization_method = DISCRETIZATION_ZOH) {
+                        DiscretizationMethod discretization_method,
+                        // Feature-SST: Structured A parameters
+                        const c10::optional<at::Tensor> &A_blocks_,
+                        const c10::optional<at::Tensor> &A_U_,
+                        const c10::optional<at::Tensor> &A_V_,
+                        int block_size,
+                        int low_rank_rank) {
 
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -113,15 +130,15 @@ void set_ssm_params_fwd(SSMParamsBase &params,
         params.low_rank_rank = low_rank_rank;
         params.num_blocks = dstate / block_size;
     } else if (params.is_full_A_matrix) {
-        params.block_size = 4;  // Default, can be made configurable
-        params.low_rank_rank = 2;  // Default, can be made configurable
+        params.block_size = 4;  // Default
+        params.low_rank_rank = 2;  // Default
         params.num_blocks = 0;
     } else {
         params.block_size = 0;
         params.low_rank_rank = 0;
         params.num_blocks = 0;
     }
-    params.A_matrix_stride = 0;  // Will be set below
+    params.A_matrix_stride = 0;
 
     // Set the pointers and strides.
     params.u_ptr = u.data_ptr();
@@ -158,9 +175,6 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     // All stride are in elements, not bytes.
     params.A_d_stride = A.stride(0);
     params.A_dstate_stride = A.stride(1);
-    // Feature-SST: A_matrix_stride for full A matrices
-    // For full A: A is (dim, dstate, dstate), A[dim_id] is a (dstate, dstate) matrix
-    // A_full will point directly to A[dim_id], so stride is 0 (not used)
     params.A_matrix_stride = 0;
     if (!is_variable_B) {
         params.B_d_stride = B.stride(0);
@@ -223,7 +237,18 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
                         void* ddelta_bias_ptr,
                         bool has_z,
                         bool delta_softplus,
-                        bool recompute_out_z) {
+                        bool recompute_out_z,
+                        DiscretizationMethod discretization_method,
+                        // Feature-SST: Structured A parameters
+                        const c10::optional<at::Tensor> &A_blocks_,
+                        const c10::optional<at::Tensor> &A_U_,
+                        const c10::optional<at::Tensor> &A_V_,
+                        int block_size,
+                        int low_rank_rank,
+                        // Feature-SST: Structured A gradient tensors
+                        const c10::optional<at::Tensor> &dA_blocks_,
+                        const c10::optional<at::Tensor> &dA_U_,
+                        const c10::optional<at::Tensor> &dA_V_) {
     // Pass in "dout" instead of "out", we're not gonna use "out" unless we have z
     set_ssm_params_fwd(params, batch, dim, seqlen, dstate, n_groups, n_chunks, is_variable_B, is_variable_C,
                        u, delta, A, B, C, has_z ? out : dout,
@@ -231,7 +256,9 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
                        // If not recompute_out_z, pass dout instead of out_z.
                        // This won't be used by the bwd kernel
                        recompute_out_z ? out_z : dout,
-                       D_ptr, delta_bias_ptr, x_ptr, has_z, delta_softplus);
+                       D_ptr, delta_bias_ptr, x_ptr, has_z, delta_softplus,
+                       discretization_method,
+                       A_blocks_, A_U_, A_V_, block_size, low_rank_rank);
     if (!recompute_out_z) { params.out_z_ptr = nullptr; }
 
     // Set the pointers and strides.
@@ -244,6 +271,24 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
     params.ddelta_ptr = ddelta.data_ptr();
     params.ddelta_bias_ptr = ddelta_bias_ptr;
     params.dz_ptr = has_z ? dz.data_ptr() : nullptr;
+    
+    // Feature-SST: Set structured A gradient pointers
+    if (dA_blocks_.has_value() && dA_U_.has_value() && dA_V_.has_value()) {
+        params.dA_blocks_ptr = dA_blocks_.value().data_ptr();
+        params.dA_U_ptr = dA_U_.value().data_ptr();
+        params.dA_V_ptr = dA_V_.value().data_ptr();
+        params.dA_blocks_stride = dA_blocks_.value().stride(0);
+        params.dA_U_stride = dA_U_.value().stride(0);
+        params.dA_V_stride = dA_V_.value().stride(0);
+    } else {
+        params.dA_blocks_ptr = nullptr;
+        params.dA_U_ptr = nullptr;
+        params.dA_V_ptr = nullptr;
+        params.dA_blocks_stride = 0;
+        params.dA_U_stride = 0;
+        params.dA_V_stride = 0;
+    }
+    
     // All stride are in elements, not bytes.
     params.dout_batch_stride = dout.stride(0);
     params.dout_d_stride = dout.stride(1);
@@ -377,7 +422,9 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                        x.data_ptr(),
                        has_z,
                        delta_softplus,
-                       disc_method);
+                       disc_method,
+                       // Feature-SST: Structured A parameters
+                       A_blocks_, A_U_, A_V_, block_size, low_rank_rank);
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
@@ -404,7 +451,14 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &out_,
                   c10::optional<at::Tensor> &dz_,
                   bool delta_softplus,
-                  bool recompute_out_z) {
+                  bool recompute_out_z,
+                  int discretization_method = 0,
+                  // Feature-SST: Structured A parameters
+                  const c10::optional<at::Tensor> &A_blocks_ = c10::nullopt,
+                  const c10::optional<at::Tensor> &A_U_ = c10::nullopt,
+                  const c10::optional<at::Tensor> &A_V_ = c10::nullopt,
+                  int block_size = 0,
+                  int low_rank_rank = 0) {
     auto input_type = u.scalar_type();
     auto weight_type = A.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);
@@ -522,8 +576,23 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
     if (D_.has_value()) { dD = torch::zeros_like(D_.value()); }
     at::Tensor ddelta_bias;
     if (delta_bias_.has_value()) { ddelta_bias = torch::zeros_like(delta_bias_.value()); }
+    
+    // Feature-SST: Create gradient tensors for structured A components
+    c10::optional<at::Tensor> dA_blocks_, dA_U_, dA_V_;
+    at::Tensor dA_blocks, dA_U, dA_V;
+    bool use_structured_A = A_blocks_.has_value() && A_U_.has_value() && A_V_.has_value() 
+                            && block_size > 0 && low_rank_rank > 0;
+    if (use_structured_A) {
+        dA_blocks = torch::zeros_like(A_blocks_.value());
+        dA_U = torch::zeros_like(A_U_.value());
+        dA_V = torch::zeros_like(A_V_.value());
+        dA_blocks_ = dA_blocks;
+        dA_U_ = dA_U;
+        dA_V_ = dA_V;
+    }
 
     SSMParamsBwd params;
+    DiscretizationMethod disc_method = static_cast<DiscretizationMethod>(discretization_method);
     set_ssm_params_bwd(params, batch_size, dim, seqlen, dstate, n_groups, n_chunks, is_variable_B, is_variable_C,
                        u, delta, A, B, C, z, out, out_z,
                        D_.has_value() ? D_.value().data_ptr() : nullptr,
@@ -532,7 +601,10 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
                        dout, du, ddelta, dA, dB, dC, dz,
                        D_.has_value() ? dD.data_ptr() : nullptr,
                        delta_bias_.has_value() ? ddelta_bias.data_ptr() : nullptr,
-                       has_z, delta_softplus, recompute_out_z);
+                       has_z, delta_softplus, recompute_out_z,
+                       disc_method,
+                       A_blocks_, A_U_, A_V_, block_size, low_rank_rank,
+                       dA_blocks_, dA_U_, dA_V_);
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
@@ -546,10 +618,30 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
     std::vector<at::Tensor> result = {du, ddelta, dA, dB.to(B.dtype()), dC.to(C.dtype()), dD, ddelta_bias};
     if (has_z) { result.push_back(dz); }
     if (recompute_out_z) { result.push_back(out_z); }
+    // Feature-SST: Include structured A gradients
+    if (use_structured_A) {
+        result.push_back(dA_blocks);
+        result.push_back(dA_U);
+        result.push_back(dA_V);
+    }
     return result;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("fwd", &selective_scan_fwd, "Selective scan forward");
-    m.def("bwd", &selective_scan_bwd, "Selective scan backward");
+    m.def("fwd", &selective_scan_fwd, "Selective scan forward",
+          py::arg("u"), py::arg("delta"), py::arg("A"), py::arg("B"), py::arg("C"),
+          py::arg("D") = py::none(), py::arg("z") = py::none(),
+          py::arg("delta_bias") = py::none(), py::arg("delta_softplus") = false,
+          py::arg("discretization_method") = 0,
+          py::arg("A_blocks") = py::none(), py::arg("A_U") = py::none(), py::arg("A_V") = py::none(),
+          py::arg("block_size") = 0, py::arg("low_rank_rank") = 0);
+    m.def("bwd", &selective_scan_bwd, "Selective scan backward",
+          py::arg("u"), py::arg("delta"), py::arg("A"), py::arg("B"), py::arg("C"),
+          py::arg("D") = py::none(), py::arg("z") = py::none(),
+          py::arg("delta_bias") = py::none(), py::arg("dout"),
+          py::arg("x") = py::none(), py::arg("out") = py::none(),
+          py::arg("dz") = py::none(), py::arg("delta_softplus") = false,
+          py::arg("recompute_out_z") = false, py::arg("discretization_method") = 0,
+          py::arg("A_blocks") = py::none(), py::arg("A_U") = py::none(), py::arg("A_V") = py::none(),
+          py::arg("block_size") = 0, py::arg("low_rank_rank") = 0);
 }

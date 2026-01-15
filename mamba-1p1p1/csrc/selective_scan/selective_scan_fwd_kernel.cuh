@@ -21,7 +21,6 @@ namespace cub = hipcub;
 #include "static_switch.h"
 #include "discretization_kernels.cuh"
 #include "matrix_ops.cuh"
-#include "structured_matrix_ops.cuh"
 
 template <int kNThreads_, int kNItems_, int kNRows_, bool kIsEvenLen_,
           bool kIsVariableB_, bool kIsVariableC_,
@@ -696,36 +695,36 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                 delta_val = delta_val_shared;
                 u_val = u_val_shared;
                 
-                // Feature-SST: Unified state step for all discretization methods
-                // Supports: ZOH, FOH, Bilinear, RK4, Poly, High-order
-                // Compute exp(delta * (blockdiag + UV^T)) @ x_old directly from structured components
-                // This avoids storing the full exp_deltaA matrix in memory!
+                // Feature-SST: Optimized state transition using block-diagonal + low-rank structure
+                // Supports all 6 discretization methods: ZOH, FOH, Bilinear, RK4, Poly, Highorder
+                // Computes directly from structured components without forming full matrix
                 if (threadIdx.x < params.dstate)
                 {
-                    // Compute Bu term
-                    float Bu = 0.0f;
+                    float B_val = 0.0f;
                     if constexpr (!kIsVariableB)
                     {
-                        float B_val = float(B[threadIdx.x * params.B_dstate_stride]);
-                        Bu = delta_val * B_val * u_val;
+                        B_val = float(B[threadIdx.x * params.B_dstate_stride]);
                     }
                     
-                    // Use unified step function that handles all discretization methods
-                    float x_new_local[SST_MAX_DSTATE];
-                    sst_structured_state_step<float>(
-                        A_blocks_shared,           // Block matrices
-                        A_U_shared,                // Low-rank U
-                        A_V_shared,                // Low-rank V
-                        x_state_shared,            // Input: x_old
-                        x_new_local,               // Output: new state
-                        delta_val,                 // Scaling factor
-                        Bu,                        // B * u term
-                        params.dstate,             // State dimension
-                        params.block_size,         // Block size
-                        params.num_blocks,         // Number of blocks
-                        params.low_rank_rank,      // Low-rank rank
-                        params.discretization_method, // Discretization method (ZOH, FOH, Bilinear, etc.)
-                        10                         // Taylor series terms
+                    float x_new_local[MAX_DSTATE];
+                    
+                    // Use unified discretization function for structured A
+                    // This handles all 6 discretization methods
+                    structured_discretization<float>(
+                        A_blocks_shared,      // Block matrices
+                        A_U_shared,          // Low-rank U
+                        A_V_shared,          // Low-rank V
+                        x_state_shared,      // Input: x_old
+                        x_new_local,         // Output: x_new
+                        delta_val,           // Time step
+                        B_val,               // B value
+                        u_val,               // Input u
+                        params.dstate,       // State dimension
+                        params.block_size,   // Block size
+                        params.num_blocks,   // Number of blocks
+                        params.low_rank_rank, // Low-rank rank
+                        threadIdx.x,         // State index
+                        params.discretization_method  // Discretization method
                     );
                     
                     x_state_new[threadIdx.x] = x_new_local[threadIdx.x];
