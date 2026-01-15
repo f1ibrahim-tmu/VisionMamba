@@ -311,7 +311,7 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                             if (threadIdx.x * kNItems + i >= params.seqlen - chunk * kChunkSize)
                             {
                                 thread_data[i] = make_float2(1.f, 0.f);
-            }
+                            }
         }
     }
     else if (params.use_structured_A)
@@ -445,12 +445,31 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                 // Feature-SST: Optimized state transition using block-diagonal + low-rank structure
                 // Supports all 6 discretization methods: ZOH, FOH, Bilinear, RK4, Poly, Highorder
                 // Computes directly from structured components without forming full matrix
+                // NOW WITH VARIABLE B AND C SUPPORT
                 if (threadIdx.x < params.dstate)
                 {
                     float B_val = 0.0f;
                     if constexpr (!kIsVariableB)
                     {
                         B_val = float(B[threadIdx.x * params.B_dstate_stride]);
+                    }
+                    else
+                    {
+                        // Load variable B for this state and time step
+                        // Bvar layout: (batch, group, dstate, seqlen) or (batch, dstate, seqlen)
+                        // Access: Bvar[state_idx * B_dstate_stride + time_step * stride]
+                        // For variable B, we need to load per time step
+                        // Calculate offset: chunk_start + t_local gives global time step
+                        int B_offset = threadIdx.x * params.B_dstate_stride + t_global * (!kIsComplex ? 1 : 2);
+                        if constexpr (!kIsComplex)
+                        {
+                            B_val = float(Bvar[B_offset]);
+                        }
+                        else
+                        {
+                            // Complex: Bvar stores real/imag pairs, use real part
+                            B_val = float(Bvar[B_offset]);
+                        }
                     }
                     
                     float x_new_local[MAX_DSTATE];
@@ -464,7 +483,7 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                         x_state_shared,      // Input: x_old
                         x_new_local,         // Output: x_new
                         delta_val,           // Time step
-                        B_val,               // B value
+                        B_val,               // B value (constant or variable)
                         u_val,               // Input u
                         params.dstate,       // State dimension
                         params.block_size,   // Block size
@@ -485,15 +504,46 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                 __syncthreads();
                 
                 __shared__ float y_vals_shared[kChunkSize];
+                // Compute output: y = C^T @ x
+                // Parallelize across state dimensions for variable C
+                __shared__ float y_partial_shared[MAX_DSTATE];
+                if (threadIdx.x < params.dstate)
+                {
+                    float C_val = 0.0f;
+                    if constexpr (!kIsVariableC)
+                    {
+                        C_val = float(C[threadIdx.x * params.C_dstate_stride]);
+                    }
+                    else
+                    {
+                        // Load variable C for this state and time step
+                        // Cvar layout: (batch, group, dstate, seqlen) or (batch, dstate, seqlen)
+                        int C_offset = threadIdx.x * params.C_dstate_stride + t_global * (!kIsComplex ? 1 : 2);
+                        if constexpr (!kIsComplex)
+                        {
+                            C_val = float(Cvar[C_offset]);
+                        }
+                        else
+                        {
+                            // Complex: Cvar stores real/imag pairs, use real part
+                            C_val = float(Cvar[C_offset]);
+                        }
+                    }
+                    y_partial_shared[threadIdx.x] = C_val * x_state_shared[threadIdx.x];
+                }
+                else
+                {
+                    y_partial_shared[threadIdx.x] = 0.0f;
+                }
+                __syncthreads();
+                
+                // Reduce sum: y = sum_s(C[s] * x[s])
                 if (threadIdx.x == 0)
                 {
                     float y_val = 0.0f;
-                    if constexpr (!kIsVariableC)
+                    for (int s = 0; s < params.dstate; ++s)
                     {
-                        for (int s = 0; s < params.dstate; ++s)
-                        {
-                            y_val += float(C[s * params.C_dstate_stride]) * x_state_shared[s];
-                        }
+                        y_val += y_partial_shared[s];
                     }
                     y_vals_shared[t_local] = y_val;
                 }
@@ -560,9 +610,9 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
             }
         }
         return; // Early return for structured A path
-    }
-    else
-    {
+                    }
+                    else
+                    {
                         // Complex case
                         weight_t B_val_actual;
                         if constexpr (!kIsVariableB)
