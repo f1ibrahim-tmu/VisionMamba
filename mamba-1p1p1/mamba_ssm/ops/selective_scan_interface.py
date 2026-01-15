@@ -82,20 +82,9 @@ class SelectiveScanFn(torch.autograd.Function):
         use_structured_A = (A_blocks is not None and A_U is not None and A_V is not None 
                             and block_size > 0 and low_rank_rank > 0)
         
-        # Polynomial Interpolation requires bidirectional (non-causal) scan,
-        # which is only implemented in the Python reference. Force Python path.
-        if discretization_method == "poly":
-            force_python = True
-            force_cuda = False
-            auto_select = False
-        
-        # Feature-SST: Full A matrices now supported in CUDA kernels (ZOH method)
-        # For other methods, fall back to Python
-        # If structured components are provided, we can use optimized CUDA path
-        if is_full_A_matrix and discretization_method != "zoh" and not use_structured_A:
-            force_python = True
-            force_cuda = False
-            auto_select = False
+        # Feature-SST: All discretization methods are now supported in CUDA kernels
+        # for block-diagonal + low-rank A matrices. NO Python fallback needed.
+        # Polynomial Interpolation is fully supported in CUDA with structured A.
         
         # Map discretization method string to enum value
         disc_method_map = {
@@ -109,9 +98,11 @@ class SelectiveScanFn(torch.autograd.Function):
         disc_method_enum = disc_method_map.get(discretization_method, 0)
         
         # Try CUDA kernel if requested (force or auto-select)
-        # Support both diagonal A, full A matrix, and structured A (block-diagonal + low-rank)
+        # Feature-SST: Support diagonal A (original) and structured A (block-diagonal + low-rank)
+        # NO full A matrices - ONLY block-diagonal + low-rank structure
+        # If structured A is provided, CUDA kernels use it directly without constructing full matrix
         can_use_cuda = (selective_scan_cuda is not None and 
-                        (not is_full_A_matrix or use_structured_A or discretization_method == "zoh"))
+                        (not is_full_A_matrix or use_structured_A))
         if (force_cuda or auto_select) and can_use_cuda:
             try:
                 # Pass structured components if available

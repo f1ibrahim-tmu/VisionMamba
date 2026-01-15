@@ -59,8 +59,9 @@ class Mamba(nn.Module):
         # This enables cross-channel dynamics while maintaining computational efficiency
         block_size=4,  # Size of each block in block-diagonal structure (e.g., 4x4, 8x8)
         low_rank_rank=2,  # Rank r for low-rank component UV^T, where r << d_state
-        use_block_diagonal_lowrank=True,  # Enable new A matrix structure
-        use_full_A_matrix=False,  # If True, return full A matrix (d_inner, d_state, d_state) instead of diagonal
+        use_block_diagonal_lowrank=True,  # Enable new A matrix structure (block-diagonal + low-rank)
+        # Note: use_full_A_matrix is deprecated - we ONLY use block-diagonal + low-rank structure
+        # CUDA kernels use structured components directly without constructing full matrices
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -86,10 +87,12 @@ class Mamba(nn.Module):
 
         # Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A matrix configuration
         # SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
+        # CUDA kernels use structured components directly - NO full matrix construction
         self.use_block_diagonal_lowrank = use_block_diagonal_lowrank
         self.block_size = block_size
         self.low_rank_rank = low_rank_rank
-        self.use_full_A_matrix = use_full_A_matrix and use_block_diagonal_lowrank  # Only valid if using new structure
+        # Note: use_full_A_matrix is deprecated - we NEVER construct full matrices
+        # CUDA kernels use A_blocks, A_U, A_V directly for maximum efficiency
         
         # Validate block configuration
         if use_block_diagonal_lowrank:
@@ -302,7 +305,7 @@ class Mamba(nn.Module):
         Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
         SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
         
-        Construct full A matrix from block-diagonal + low-rank components.
+        Stores structured components for CUDA kernels WITHOUT constructing full matrix.
         
         A = blockdiag(A_1, ..., A_K) + UV^T
         
@@ -311,13 +314,13 @@ class Mamba(nn.Module):
         - U, V ∈ R^(N × r): low-rank factors with r << N
         - N = d_state (state dimension)
         
-        Computational Cost:
-        - Block-diagonal construction: O(K * block_size^2 * d_inner) where K = d_state / block_size
-        - Low-rank component UV^T: O(d_inner * d_state * r) where r << d_state
-        - Total: O(d_inner * (K * block_size^2 + d_state * r))
-        - Compared to dense A: O(d_inner * d_state^2), this is much cheaper when r << d_state
+        Key Optimization:
+        - Does NOT construct full (d_inner, d_state, d_state) matrix
+        - Stores structured components: A_blocks, A_U, A_V
+        - CUDA kernels use these directly, avoiding O(d_inner * d_state^2) memory
+        - Only computes diagonal for backward compatibility (step() function)
         
-        Memory Footprint:
+        Memory Savings:
         - Block-diagonal: K * block_size^2 * d_inner parameters
         - Low-rank: 2 * d_state * r * d_inner parameters (U and V)
         - Total: d_inner * (K * block_size^2 + 2 * d_state * r) parameters
@@ -325,18 +328,14 @@ class Mamba(nn.Module):
           - Blocks: 4 * 16 * 768 = 49,152
           - Low-rank: 2 * 16 * 2 * 768 = 49,152
           - Total: 98,304 parameters vs 196,608 for dense A (50% reduction)
-        
-        Integration with Mamba Kernels:
-        - Currently returns diagonal for backward compatibility with existing kernels
-        - Full integration requires updating selective_scan_fn and related CUDA kernels
-        - TODO: Update kernels to handle full A matrices for full benefit
+          - NO full matrix construction = 0 additional memory!
         
         Args:
             bidirectional: If True, construct bidirectional A matrix (A_b)
         
         Returns:
-            A: (d_inner, d_state) tensor (diagonal extraction for compatibility)
-               Full matrix available internally as (d_inner, d_state, d_state)
+            A: (d_inner, d_state) tensor (diagonal for backward compatibility)
+               Structured components stored in _A_blocks_structured, _A_U_structured, _A_V_structured
         """
         if not self.use_block_diagonal_lowrank:
             # Original diagonal A: return as (d_inner, d_state)
@@ -360,43 +359,39 @@ class Mamba(nn.Module):
             A_U = self.A_U
             A_V = self.A_V
         
-        device = A_blocks[0].device
-        dtype = A_blocks[0].dtype
-        
-        # Initialize full A matrix for each channel: (d_inner, d_state, d_state)
-        A_full = torch.zeros(
-            self.d_inner, self.d_state, self.d_state,
-            dtype=dtype, device=device
-        )
-        
-        # Construct block-diagonal part
-        for k in range(self.num_blocks):
-            start_idx = k * self.block_size
-            end_idx = (k + 1) * self.block_size
-            # Place each block on the diagonal
-            A_full[:, start_idx:end_idx, start_idx:end_idx] = A_blocks[k]
-        
-        # Add low-rank component: UV^T
-        # A_U: (d_inner, d_state, low_rank_rank)
-        # A_V: (d_inner, d_state, low_rank_rank)
-        # UV^T: (d_inner, d_state, d_state)
-        UVT = torch.bmm(A_U, A_V.transpose(-2, -1))  # (d_inner, d_state, d_state)
-        A_full = A_full + UVT
-        
-        # Store structured components for efficient CUDA kernel usage
-        # These will be used by CUDA kernels to avoid constructing full matrix
+        # Feature-SST: Store structured components for efficient CUDA kernel usage
+        # CUDA kernels use these directly WITHOUT constructing full matrix
+        # This avoids O(d_inner * d_state^2) memory and computation
         self._A_blocks_structured = A_blocks
         self._A_U_structured = A_U
         self._A_V_structured = A_V
         
-        # Return full matrix for new kernels, diagonal for backward compatibility
-        # Check if we should return full matrix (when use_full_A_matrix is True)
-        if hasattr(self, 'use_full_A_matrix') and self.use_full_A_matrix:
-            return A_full  # (d_inner, d_state, d_state)
-        else:
-            # For backward compatibility with existing kernels that expect diagonal A
-            A_diag = A_full.diagonal(dim1=-2, dim2=-1)  # (d_inner, d_state)
-            return A_diag
+        # For backward compatibility: compute diagonal only if needed
+        # CUDA kernels will use structured components directly, NOT full matrix
+        device = A_blocks[0].device
+        dtype = A_blocks[0].dtype
+        
+        # Compute diagonal efficiently without constructing full matrix
+        # Diagonal of blockdiag(A_1, ..., A_K) + UV^T = diag(blockdiag) + diag(UV^T)
+        A_diag = torch.zeros(self.d_inner, self.d_state, dtype=dtype, device=device)
+        
+        # Extract diagonal from each block
+        for k in range(self.num_blocks):
+            start_idx = k * self.block_size
+            end_idx = (k + 1) * self.block_size
+            # Get diagonal of block k: (d_inner, block_size)
+            block_diag = A_blocks[k].diagonal(dim1=-2, dim2=-1)  # (d_inner, block_size)
+            A_diag[:, start_idx:end_idx] = block_diag
+        
+        # Add diagonal of UV^T: diag(UV^T) = sum(U[i,:] * V[i,:]) for each i
+        # U: (d_inner, d_state, low_rank_rank), V: (d_inner, d_state, low_rank_rank)
+        # diag(UV^T)[i] = sum_r(U[i,r] * V[i,r])
+        UV_diag = (A_U * A_V).sum(dim=-1)  # (d_inner, d_state)
+        A_diag = A_diag + UV_diag
+        
+        # Return diagonal for backward compatibility (step() function uses it)
+        # CUDA kernels will use structured components directly via _A_blocks_structured
+        return A_diag  # (d_inner, d_state)
 
     def forward(self, hidden_states, inference_params=None):
         """

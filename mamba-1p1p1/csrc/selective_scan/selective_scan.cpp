@@ -117,8 +117,8 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     
     // Feature-SST: Structured State Transitions - Block-Diagonal + Low-Rank A
     // SST = Structured State Transitions: A = blockdiag(A_1, ..., A_K) + UV^T
-    // Set full A matrix parameters
-    params.is_full_A_matrix = (A.dim() == 3 && A.size(2) == A.size(1));
+    // ONLY use block-diagonal + low-rank structure, NO full A matrices
+    params.is_full_A_matrix = false;  // Never use full A matrices, only structured A
     
     // Check if structured components are provided
     bool use_structured_A = (A_blocks_.has_value() && A_U_.has_value() && A_V_.has_value() 
@@ -129,10 +129,6 @@ void set_ssm_params_fwd(SSMParamsBase &params,
         params.block_size = block_size;
         params.low_rank_rank = low_rank_rank;
         params.num_blocks = dstate / block_size;
-    } else if (params.is_full_A_matrix) {
-        params.block_size = 4;  // Default
-        params.low_rank_rank = 2;  // Default
-        params.num_blocks = 0;
     } else {
         params.block_size = 0;
         params.low_rank_rank = 0;
