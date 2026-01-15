@@ -55,18 +55,18 @@ class Mamba(nn.Module):
         init_layer_scale=None,
         discretization_method="zoh",  # New parameter for discretization method
         use_cuda_kernel=None,  # None=auto, True=force CUDA, False=force Python
-    ):
-        factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
-        self.d_model = d_model
-        self.d_state = d_state
-        self.d_conv = d_conv
         # Feature-StabEnforce: Stability Enforcement on State Dynamics
         use_spectral_normalization=False,  # Enable spectral normalization: A ← A / max(1, ρ(A))
         use_eigenvalue_clamping=False,  # Enable eigenvalue clamping for block matrices
         use_stability_penalty=False,  # Enable soft penalty loss: L_stab = Σ max(0, ℜ(λ_i(A)) - ε)
         stability_epsilon=0.01,  # Threshold for stability penalty (ε)
         stability_penalty_weight=0.1,  # Weight for stability penalty in loss (λ_stab)
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.d_model = d_model
+        self.d_state = d_state
+        self.d_conv = d_conv
         self.expand = expand
         self.d_inner = int(self.expand * self.d_model)
         self.dt_rank = math.ceil(self.d_model / 16) if dt_rank == "auto" else dt_rank
@@ -190,6 +190,35 @@ class Mamba(nn.Module):
         self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias, **factory_kwargs)
 
 
+    def _construct_A_matrix(self, bidirectional=False):
+        """
+        Feature-StabEnforce: Construct A matrix and apply stability enforcement.
+        
+        Args:
+            bidirectional: If True, construct bidirectional A matrix
+            
+        Returns:
+            A: A matrix with stability enforcement applied (if enabled)
+        """
+        if bidirectional:
+            if self.bimamba_type == "v1" or self.bimamba_type == "v2":
+                A = -torch.exp(self.A_b_log.float())  # (d_inner, d_state)
+            else:
+                A = -torch.exp(self.A_log.float())  # (d_inner, d_state)
+        else:
+            A = -torch.exp(self.A_log.float())  # (d_inner, d_state)
+        
+        # Apply stability enforcement if enabled
+        if self.use_spectral_normalization or self.use_eigenvalue_clamping:
+            A = apply_stability_enforcement(
+                A,
+                use_spectral_normalization=self.use_spectral_normalization,
+                use_eigenvalue_clamping=self.use_eigenvalue_clamping,
+                epsilon=self.stability_epsilon,
+            )
+        
+        return A
+
     def compute_stability_loss(self, bidirectional=False):
         """
         Feature-StabEnforce: Compute stability penalty loss.
@@ -242,10 +271,26 @@ class Mamba(nn.Module):
             xz = xz + rearrange(self.in_proj.bias.to(dtype=xz.dtype), "d -> d 1")
 
         A = -torch.exp(self.A_log.float())  # (d_inner, d_state)
+        # Feature-StabEnforce: Apply stability enforcement if enabled
+        if self.use_spectral_normalization or self.use_eigenvalue_clamping:
+            A = apply_stability_enforcement(
+                A,
+                use_spectral_normalization=self.use_spectral_normalization,
+                use_eigenvalue_clamping=self.use_eigenvalue_clamping,
+                epsilon=self.stability_epsilon,
+            )
         # In the backward pass we write dx and dz next to each other to avoid torch.cat
         if self.use_fast_path and inference_params is None:  # Doesn't support outputting the states
             if self.bimamba_type == "v1":
                 A_b = -torch.exp(self.A_b_log.float())
+                # Feature-StabEnforce: Apply stability enforcement to bidirectional A
+                if self.use_spectral_normalization or self.use_eigenvalue_clamping:
+                    A_b = apply_stability_enforcement(
+                        A_b,
+                        use_spectral_normalization=self.use_spectral_normalization,
+                        use_eigenvalue_clamping=self.use_eigenvalue_clamping,
+                        epsilon=self.stability_epsilon,
+                    )
                 out = bimamba_inner_fn(
                     xz,
                     self.conv1d.weight,
@@ -264,6 +309,14 @@ class Mamba(nn.Module):
                 )    
             elif self.bimamba_type == "v2":
                 A_b = -torch.exp(self.A_b_log.float())
+                # Feature-StabEnforce: Apply stability enforcement to bidirectional A
+                if self.use_spectral_normalization or self.use_eigenvalue_clamping:
+                    A_b = apply_stability_enforcement(
+                        A_b,
+                        use_spectral_normalization=self.use_spectral_normalization,
+                        use_eigenvalue_clamping=self.use_eigenvalue_clamping,
+                        epsilon=self.stability_epsilon,
+                    )
                 out = mamba_inner_fn_no_out_proj(
                     xz,
                     self.conv1d.weight,
@@ -391,6 +444,14 @@ class Mamba(nn.Module):
         # Don't add dt_bias here
         dt = F.linear(dt, self.dt_proj.weight)  # (B d_inner)
         A = -torch.exp(self.A_log.float())  # (d_inner, d_state)
+        # Feature-StabEnforce: Apply stability enforcement if enabled
+        if self.use_spectral_normalization or self.use_eigenvalue_clamping:
+            A = apply_stability_enforcement(
+                A,
+                use_spectral_normalization=self.use_spectral_normalization,
+                use_eigenvalue_clamping=self.use_eigenvalue_clamping,
+                epsilon=self.stability_epsilon,
+            )
 
         # SSM step
         if selective_state_update is None:
