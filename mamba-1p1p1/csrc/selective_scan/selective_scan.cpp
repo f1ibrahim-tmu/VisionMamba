@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "selective_scan.h"
+#include "selective_scan_bidirectional.cuh"
 
 namespace py = pybind11;
 
@@ -65,6 +66,13 @@ void selective_scan_fwd_cuda(SSMParamsBase &params, cudaStream_t stream);
 
 template <typename input_t, typename weight_t>
 void selective_scan_bwd_cuda(SSMParamsBwd &params, cudaStream_t stream);
+
+// Feature-SST: Bidirectional Mamba support
+template <typename input_t, typename weight_t>
+void selective_scan_bidirectional_fwd_cuda(SSMParamsBidirectional &params, cudaStream_t stream);
+
+template <typename input_t, typename weight_t>
+void selective_scan_bidirectional_bwd_cuda(SSMParamsBidirectional &params, cudaStream_t stream);
 
 void set_ssm_params_fwd(SSMParamsBase &params,
                         // sizes

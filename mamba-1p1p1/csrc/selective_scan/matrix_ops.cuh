@@ -857,12 +857,482 @@ __device__ __forceinline__ void structured_discretization(
 
 // ============================================================================
 // BACKWARD PASS: Gradient computation for structured A matrices
+// Method-specific gradients for all 6 discretization methods
 // ============================================================================
 
 // Gradient of matrix exponential: d/dA exp(A) = integral_0^1 exp((1-t)A) dA exp(tA) dt
 // For computational efficiency, we use the approximation:
 // d(exp(A)@x)/dA ≈ exp(A) @ x @ e_i^T where e_i is the unit vector
 // This gives us the gradient contribution for each element
+
+// Method-specific gradient computation for structured A matrices
+// Computes gradients w.r.t. A_blocks, A_U, A_V, delta, B, u, x_old
+template <typename T>
+__device__ __forceinline__ void structured_gradient_method_specific(
+    const T *A_blocks, const T *U, const T *V,
+    const T *x_old, const T *x_new,  // x_new is the output from forward pass
+    float delta, float B_val, float u_val,
+    const T *grad_output,  // Gradient w.r.t. x_new
+    T *grad_A_blocks, T *grad_U, T *grad_V,
+    T *grad_x_old, T *grad_delta, T *grad_B, T *grad_u,
+    int dstate, int block_size, int num_blocks, int rank,
+    int state_idx,
+    DiscretizationMethod method)
+{
+    switch (method)
+    {
+        case DISCRETIZATION_ZOH:
+        {
+            // ZOH: x_new = exp(δA) @ x_old + δBu
+            // Gradient through exp(δA) @ x_old
+            // d(exp(δA)@x)/dA ≈ δ * x[j] * grad[i] (first-order)
+            // More accurate: use x_new - δBu for exp(δA)@x
+            
+            T exp_A_x_val = x_new[state_idx] - T(delta * B_val * u_val);
+            
+            // Gradient w.r.t. A_blocks (block-diagonal part)
+            int block_idx = state_idx / block_size;
+            int local_i = state_idx % block_size;
+            
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    grad_A_blocks[A_idx] = grad_A_blocks[A_idx] + T(delta) * grad_output[state_idx] * x_old[global_j];
+                }
+            }
+            
+            // Gradient w.r.t. U and V (low-rank part)
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                grad_U[state_idx * rank + r] = grad_U[state_idx * rank + r] + T(delta) * grad_output[state_idx] * Vtx_r;
+                
+                for (int j = 0; j < dstate; ++j)
+                {
+                    grad_V[j * rank + r] = grad_V[j * rank + r] + T(delta) * U[state_idx * rank + r] * grad_output[state_idx] * x_old[j];
+                }
+            }
+            
+            // Gradient w.r.t. x_old: exp(δA)^T @ grad_output
+            T grad_x_contrib = grad_output[state_idx];
+            
+            // Block-diagonal contribution
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_j * block_size + local_i; // Transpose
+                    grad_x_contrib = grad_x_contrib + T(delta) * A_blocks[A_idx] * grad_output[global_j];
+                }
+            }
+            
+            // Low-rank contribution
+            for (int r = 0; r < rank; ++r)
+            {
+                T Utgrad_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Utgrad_r = Utgrad_r + U[j * rank + r] * grad_output[j];
+                }
+                grad_x_contrib = grad_x_contrib + T(delta) * V[state_idx * rank + r] * Utgrad_r;
+            }
+            
+            grad_x_old[state_idx] = grad_x_contrib;
+            
+            // Gradient w.r.t. delta, B, u
+            T Ax_val = T(0.0f);
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    Ax_val = Ax_val + A_blocks[A_idx] * x_old[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                Ax_val = Ax_val + U[state_idx * rank + r] * Vtx_r;
+            }
+            
+            *grad_delta = *grad_delta + grad_output[state_idx] * (Ax_val + T(B_val * u_val));
+            *grad_B = *grad_B + T(delta * u_val) * grad_output[state_idx];
+            *grad_u = *grad_u + T(delta * B_val) * grad_output[state_idx];
+            break;
+        }
+        
+        case DISCRETIZATION_FOH:
+        {
+            // FOH: x_new = exp(δA) @ x_old + B_d * u
+            // B_d = A^(-2) * (exp(A*Δ) - I - A*Δ) * B ≈ (Δ²/2 + A*Δ³/6 + ...) * B
+            // Gradient needs to account for B_d term that depends on A
+            
+            // For FOH, the B_d term adds extra gradient contributions through A
+            // Simplified: treat B_d as approximately (Δ²/2) * B for gradient computation
+            // More accurate would require computing gradient through full B_d formula
+            
+            float delta_sq = delta * delta;
+            float delta_cubed = delta_sq * delta;
+            
+            // Gradient through exp(δA) @ x_old (same as ZOH)
+            T exp_A_x_val = x_new[state_idx] - T((delta_sq * 0.5f) * B_val * u_val);
+            
+            // A_blocks gradient (includes contribution from B_d term)
+            int block_idx = state_idx / block_size;
+            int local_i = state_idx % block_size;
+            
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    // Main gradient from exp(δA) @ x_old
+                    grad_A_blocks[A_idx] = grad_A_blocks[A_idx] + T(delta) * grad_output[state_idx] * x_old[global_j];
+                    // Additional gradient from B_d term (simplified)
+                    if (state_idx == global_j)  // Diagonal term
+                    {
+                        grad_A_blocks[A_idx] = grad_A_blocks[A_idx] + T(delta_cubed / 6.0f * B_val * u_val) * grad_output[state_idx];
+                    }
+                }
+            }
+            
+            // U, V gradients (similar to ZOH, with B_d correction)
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                grad_U[state_idx * rank + r] = grad_U[state_idx * rank + r] + T(delta) * grad_output[state_idx] * Vtx_r;
+                
+                for (int j = 0; j < dstate; ++j)
+                {
+                    grad_V[j * rank + r] = grad_V[j * rank + r] + T(delta) * U[state_idx * rank + r] * grad_output[state_idx] * x_old[j];
+                }
+            }
+            
+            // Gradient w.r.t. x_old (same as ZOH)
+            T grad_x_contrib = grad_output[state_idx];
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_j * block_size + local_i;
+                    grad_x_contrib = grad_x_contrib + T(delta) * A_blocks[A_idx] * grad_output[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Utgrad_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Utgrad_r = Utgrad_r + U[j * rank + r] * grad_output[j];
+                }
+                grad_x_contrib = grad_x_contrib + T(delta) * V[state_idx * rank + r] * Utgrad_r;
+            }
+            grad_x_old[state_idx] = grad_x_contrib;
+            
+            // Gradient w.r.t. delta, B, u (with FOH-specific terms)
+            T Ax_val = T(0.0f);
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    Ax_val = Ax_val + A_blocks[A_idx] * x_old[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                Ax_val = Ax_val + U[state_idx * rank + r] * Vtx_r;
+            }
+            
+            *grad_delta = *grad_delta + grad_output[state_idx] * (Ax_val + T((delta * B_val) * u_val));
+            *grad_B = *grad_B + T((delta_sq * 0.5f) * u_val) * grad_output[state_idx];
+            *grad_u = *grad_u + T((delta_sq * 0.5f) * B_val) * grad_output[state_idx];
+            break;
+        }
+        
+        case DISCRETIZATION_BILINEAR:
+        {
+            // Bilinear: x_new = A_d @ x_old + B_d * u
+            // A_d = (I - δA/2)^(-1) * (I + δA/2) ≈ I + δA + (δA)²/2 + ...
+            // B_d = (I - δA/2)^(-1) * δ * B ≈ δB + (δA/2) * δB + ...
+            
+            // For gradient computation, use first-order approximation:
+            // A_d ≈ I + δA, B_d ≈ δB
+            
+            int block_idx = state_idx / block_size;
+            int local_i = state_idx % block_size;
+            
+            // Gradient through A_d @ x_old
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    // A_d ≈ I + δA, so gradient ≈ δ * x[j] * grad[i]
+                    grad_A_blocks[A_idx] = grad_A_blocks[A_idx] + T(delta) * grad_output[state_idx] * x_old[global_j];
+                }
+            }
+            
+            // U, V gradients
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                grad_U[state_idx * rank + r] = grad_U[state_idx * rank + r] + T(delta) * grad_output[state_idx] * Vtx_r;
+                
+                for (int j = 0; j < dstate; ++j)
+                {
+                    grad_V[j * rank + r] = grad_V[j * rank + r] + T(delta) * U[state_idx * rank + r] * grad_output[state_idx] * x_old[j];
+                }
+            }
+            
+            // Gradient w.r.t. x_old: A_d^T @ grad_output ≈ (I + δA^T) @ grad_output
+            T grad_x_contrib = grad_output[state_idx];
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_j * block_size + local_i;
+                    grad_x_contrib = grad_x_contrib + T(delta) * A_blocks[A_idx] * grad_output[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Utgrad_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Utgrad_r = Utgrad_r + U[j * rank + r] * grad_output[j];
+                }
+                grad_x_contrib = grad_x_contrib + T(delta) * V[state_idx * rank + r] * Utgrad_r;
+            }
+            grad_x_old[state_idx] = grad_x_contrib;
+            
+            // Gradient w.r.t. delta, B, u
+            T Ax_val = T(0.0f);
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    Ax_val = Ax_val + A_blocks[A_idx] * x_old[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                Ax_val = Ax_val + U[state_idx * rank + r] * Vtx_r;
+            }
+            
+            *grad_delta = *grad_delta + grad_output[state_idx] * (Ax_val + T(B_val * u_val));
+            *grad_B = *grad_B + T(delta * u_val) * grad_output[state_idx];
+            *grad_u = *grad_u + T(delta * B_val) * grad_output[state_idx];
+            break;
+        }
+        
+        case DISCRETIZATION_RK4:
+        {
+            // RK4: x_new = x_old + δ/6 * (k1 + 2*k2 + 2*k3 + k4)
+            // Each k_i = A @ x_i + B*u where x_i depends on previous stages
+            // Gradient needs to propagate through all 4 stages
+            
+            // Simplified: treat as single step with effective A_d ≈ I + δA
+            // More accurate would require storing k1, k2, k3, k4 and propagating through each
+            
+            int block_idx = state_idx / block_size;
+            int local_i = state_idx % block_size;
+            
+            // Use ZOH-like gradient (RK4 is more complex, this is an approximation)
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    grad_A_blocks[A_idx] = grad_A_blocks[A_idx] + T(delta) * grad_output[state_idx] * x_old[global_j];
+                }
+            }
+            
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                grad_U[state_idx * rank + r] = grad_U[state_idx * rank + r] + T(delta) * grad_output[state_idx] * Vtx_r;
+                
+                for (int j = 0; j < dstate; ++j)
+                {
+                    grad_V[j * rank + r] = grad_V[j * rank + r] + T(delta) * U[state_idx * rank + r] * grad_output[state_idx] * x_old[j];
+                }
+            }
+            
+            T grad_x_contrib = grad_output[state_idx];
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_j * block_size + local_i;
+                    grad_x_contrib = grad_x_contrib + T(delta) * A_blocks[A_idx] * grad_output[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Utgrad_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Utgrad_r = Utgrad_r + U[j * rank + r] * grad_output[j];
+                }
+                grad_x_contrib = grad_x_contrib + T(delta) * V[state_idx * rank + r] * Utgrad_r;
+            }
+            grad_x_old[state_idx] = grad_x_contrib;
+            
+            T Ax_val = T(0.0f);
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    Ax_val = Ax_val + A_blocks[A_idx] * x_old[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                Ax_val = Ax_val + U[state_idx * rank + r] * Vtx_r;
+            }
+            
+            *grad_delta = *grad_delta + grad_output[state_idx] * (Ax_val + T(B_val * u_val));
+            *grad_B = *grad_B + T(delta * u_val) * grad_output[state_idx];
+            *grad_u = *grad_u + T(delta * B_val) * grad_output[state_idx];
+            break;
+        }
+        
+        case DISCRETIZATION_POLY:
+        case DISCRETIZATION_HIGHORDER:
+        default:
+        {
+            // Poly and Highorder: Similar to FOH but with different coefficients
+            // Use FOH-like gradient computation
+            
+            float delta_sq = delta * delta;
+            int block_idx = state_idx / block_size;
+            int local_i = state_idx % block_size;
+            
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    grad_A_blocks[A_idx] = grad_A_blocks[A_idx] + T(delta) * grad_output[state_idx] * x_old[global_j];
+                }
+            }
+            
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                grad_U[state_idx * rank + r] = grad_U[state_idx * rank + r] + T(delta) * grad_output[state_idx] * Vtx_r;
+                
+                for (int j = 0; j < dstate; ++j)
+                {
+                    grad_V[j * rank + r] = grad_V[j * rank + r] + T(delta) * U[state_idx * rank + r] * grad_output[state_idx] * x_old[j];
+                }
+            }
+            
+            T grad_x_contrib = grad_output[state_idx];
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_j * block_size + local_i;
+                    grad_x_contrib = grad_x_contrib + T(delta) * A_blocks[A_idx] * grad_output[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Utgrad_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Utgrad_r = Utgrad_r + U[j * rank + r] * grad_output[j];
+                }
+                grad_x_contrib = grad_x_contrib + T(delta) * V[state_idx * rank + r] * Utgrad_r;
+            }
+            grad_x_old[state_idx] = grad_x_contrib;
+            
+            T Ax_val = T(0.0f);
+            if (block_idx < num_blocks)
+            {
+                for (int local_j = 0; local_j < block_size && (block_idx * block_size + local_j) < dstate; ++local_j)
+                {
+                    int global_j = block_idx * block_size + local_j;
+                    int A_idx = block_idx * block_size * block_size + local_i * block_size + local_j;
+                    Ax_val = Ax_val + A_blocks[A_idx] * x_old[global_j];
+                }
+            }
+            for (int r = 0; r < rank; ++r)
+            {
+                T Vtx_r = T(0.0f);
+                for (int j = 0; j < dstate; ++j)
+                {
+                    Vtx_r = Vtx_r + V[j * rank + r] * x_old[j];
+                }
+                Ax_val = Ax_val + U[state_idx * rank + r] * Vtx_r;
+            }
+            
+            *grad_delta = *grad_delta + grad_output[state_idx] * (Ax_val + T(B_val * u_val));
+            *grad_B = *grad_B + T((delta + delta_sq * 0.25f) * u_val) * grad_output[state_idx];
+            *grad_u = *grad_u + T((delta + delta_sq * 0.25f) * B_val) * grad_output[state_idx];
+            break;
+        }
+    }
+}
 
 // Gradient of block-diagonal matrix-vector multiplication
 // d(blockdiag @ x)/dA_block_ij = x_j for position (i,j) in block

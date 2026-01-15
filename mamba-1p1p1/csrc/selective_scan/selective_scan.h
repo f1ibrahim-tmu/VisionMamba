@@ -166,6 +166,23 @@ struct SSMParamsBidirectional: public SSMParamsBase {
     void *__restrict__ out_bwd_ptr;    // Backward pass output
     void *__restrict__ x_bwd_ptr;      // Backward state storage
     
+    // Backward pass gradient pointers (for bidirectional backward)
+    void *__restrict__ dout_fwd_ptr;   // Gradient w.r.t. forward output
+    void *__restrict__ dout_bwd_ptr;   // Gradient w.r.t. backward output
+    void *__restrict__ dA_fwd_blocks_ptr;  // Gradient for forward A_blocks
+    void *__restrict__ dA_fwd_U_ptr;       // Gradient for forward A_U
+    void *__restrict__ dA_fwd_V_ptr;       // Gradient for forward A_V
+    void *__restrict__ dA_bwd_blocks_ptr;  // Gradient for backward A_blocks (if separate)
+    void *__restrict__ dA_bwd_U_ptr;       // Gradient for backward A_U (if separate)
+    void *__restrict__ dA_bwd_V_ptr;       // Gradient for backward A_V (if separate)
+    
+    // Backward pass gradient strides (from SSMParamsBwd)
+    index_t dout_batch_stride;
+    index_t dout_d_stride;
+    index_t dA_blocks_stride;  // For (d_inner, num_blocks, block_size, block_size)
+    index_t dA_U_stride;       // For (d_inner, d_state, low_rank_rank)
+    index_t dA_V_stride;       // For (d_inner, d_state, low_rank_rank)
+    
     // Combination method
     bool concat_bidirectional;  // true = concatenate, false = add
 };
