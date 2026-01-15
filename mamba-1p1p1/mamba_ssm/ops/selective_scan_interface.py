@@ -82,6 +82,50 @@ class SelectiveScanFn(torch.autograd.Function):
         use_structured_A = (A_blocks is not None and A_U is not None and A_V is not None 
                             and block_size > 0 and low_rank_rank > 0)
         
+        # Feature-SST: Validate structured A parameters if provided
+        if use_structured_A:
+            # Validate A_blocks is a list or tensor
+            if isinstance(A_blocks, list):
+                num_blocks = len(A_blocks)
+                if num_blocks == 0:
+                    raise ValueError("A_blocks list cannot be empty")
+                # Check all blocks have same shape
+                block_shape = A_blocks[0].shape
+                for i, block in enumerate(A_blocks):
+                    if block.shape != block_shape:
+                        raise ValueError(f"A_blocks[{i}] has shape {block.shape}, expected {block_shape}")
+                    if block.shape[-1] != block.shape[-2]:
+                        raise ValueError(f"A_blocks[{i}] must be square, got shape {block.shape}")
+                    if block.shape[-1] != block_size:
+                        raise ValueError(f"A_blocks[{i}] block size {block.shape[-1]} != block_size {block_size}")
+            elif isinstance(A_blocks, torch.Tensor):
+                # A_blocks is a tensor: (d_inner, num_blocks, block_size, block_size)
+                if A_blocks.dim() != 4:
+                    raise ValueError(f"A_blocks tensor must be 4D (d_inner, num_blocks, block_size, block_size), got {A_blocks.shape}")
+                if A_blocks.shape[-1] != block_size or A_blocks.shape[-2] != block_size:
+                    raise ValueError(f"A_blocks block size {A_blocks.shape[-2:]} != block_size {block_size}")
+            
+            # Validate A_U and A_V shapes
+            if A_U.dim() != 3 or A_U.shape[-1] != low_rank_rank:
+                raise ValueError(f"A_U must have shape (d_inner, d_state, low_rank_rank), got {A_U.shape}")
+            if A_V.dim() != 3 or A_V.shape[-1] != low_rank_rank:
+                raise ValueError(f"A_V must have shape (d_inner, d_state, low_rank_rank), got {A_V.shape}")
+            if A_U.shape != A_V.shape:
+                raise ValueError(f"A_U shape {A_U.shape} != A_V shape {A_V.shape}")
+            
+            # Validate block_size and low_rank_rank
+            if block_size <= 0 or block_size > 16:
+                raise ValueError(f"block_size must be in (0, 16], got {block_size}")
+            if low_rank_rank <= 0 or low_rank_rank > 16:
+                raise ValueError(f"low_rank_rank must be in (0, 16], got {low_rank_rank}")
+            
+            # Validate d_state is divisible by block_size
+            d_state_from_A = A.shape[-1] * (2 if A.is_complex() else 1)
+            if d_state_from_A % block_size != 0:
+                raise ValueError(f"d_state ({d_state_from_A}) must be divisible by block_size ({block_size})")
+            if low_rank_rank >= d_state_from_A:
+                raise ValueError(f"low_rank_rank ({low_rank_rank}) must be < d_state ({d_state_from_A})")
+        
         # Feature-SST: All discretization methods are now supported in CUDA kernels
         # for block-diagonal + low-rank A matrices. NO Python fallback needed.
         # Polynomial Interpolation is fully supported in CUDA with structured A.
@@ -1157,7 +1201,11 @@ class BiMambaInnerFn(torch.autograd.Function):
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
+                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1,
+                # Feature-SST: Structured A components for forward direction
+                A_blocks=None, A_U=None, A_V=None, block_size=0, low_rank_rank=0,
+                # Feature-SST: Structured A components for backward direction (optional)
+                A_b_blocks=None, A_b_U=None, A_b_V=None):
         """
              xz: (batch, dim, seqlen)
         """
@@ -1212,27 +1260,84 @@ class BiMambaInnerFn(torch.autograd.Function):
                 C = C.contiguous()
         if D is not None:
             D = D.contiguous()
+        # Feature-SST: Check if structured A is being used
+        use_structured_A = (A_blocks is not None and A_U is not None and A_V is not None 
+                            and block_size > 0 and low_rank_rank > 0)
+        use_structured_A_b = (A_b_blocks is not None and A_b_U is not None and A_b_V is not None 
+                               and block_size > 0 and low_rank_rank > 0)
+        
         # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
         # Default to zoh (0) for BiMambaInnerFn
         disc_method_enum = 0
-        out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
-        )
+        
+        # Feature-SST: Use structured A if provided
+        if use_structured_A:
+            # Convert A_blocks list to tensor if needed
+            if isinstance(A_blocks, list):
+                A_blocks_tensor = torch.stack([block for block in A_blocks], dim=1)
+            else:
+                A_blocks_tensor = A_blocks
+            A_U_contig = A_U.contiguous() if not A_U.is_contiguous() else A_U
+            A_V_contig = A_V.contiguous() if not A_V.is_contiguous() else A_V
+            out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
+                conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum,
+                A_blocks_tensor, A_U_contig, A_V_contig, block_size, low_rank_rank
+            )
+        else:
+            out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
+                conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
+            )
+        
         assert not A_b.is_complex(), "A should not be complex!!"
-        out_b, scan_intermediates_b, out_z_b = selective_scan_cuda.fwd(
-            conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, delta_softplus, disc_method_enum
-        )
+        
+        # Feature-SST: Use structured A_b if provided, otherwise use same as forward or diagonal
+        if use_structured_A_b:
+            # Convert A_b_blocks list to tensor if needed
+            if isinstance(A_b_blocks, list):
+                A_b_blocks_tensor = torch.stack([block for block in A_b_blocks], dim=1)
+            else:
+                A_b_blocks_tensor = A_b_blocks
+            A_b_U_contig = A_b_U.contiguous() if not A_b_U.is_contiguous() else A_b_U
+            A_b_V_contig = A_b_V.contiguous() if not A_b_V.is_contiguous() else A_b_V
+            out_b, scan_intermediates_b, out_z_b = selective_scan_cuda.fwd(
+                conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), 
+                delta_bias, delta_softplus, disc_method_enum,
+                A_b_blocks_tensor, A_b_U_contig, A_b_V_contig, block_size, low_rank_rank
+            )
+        elif use_structured_A:
+            # Use same structured A for backward direction
+            out_b, scan_intermediates_b, out_z_b = selective_scan_cuda.fwd(
+                conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), 
+                delta_bias, delta_softplus, disc_method_enum,
+                A_blocks_tensor, A_U_contig, A_V_contig, block_size, low_rank_rank
+            )
+        else:
+            out_b, scan_intermediates_b, out_z_b = selective_scan_cuda.fwd(
+                conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), 
+                delta_bias, delta_softplus, disc_method_enum
+            )
 
         out_z = out_z_f + out_z_b.flip([-1])
 
         ctx.delta_softplus = delta_softplus
         ctx.out_proj_bias_is_None = out_proj_bias is None
         ctx.checkpoint_lvl = checkpoint_lvl
+        ctx.use_structured_A = use_structured_A
+        ctx.use_structured_A_b = use_structured_A_b
+        ctx.block_size = block_size if use_structured_A else 0
+        ctx.low_rank_rank = low_rank_rank if use_structured_A else 0
         if checkpoint_lvl >= 1:  # Will recompute conv1d_out and delta in the backward pass
             conv1d_out, delta = None, None
         ctx.save_for_backward(xz, conv1d_weight, conv1d_bias, x_dbl, x_proj_weight,
                               delta_proj_weight, out_proj_weight, conv1d_out, delta,
-                              A, A_b, B, C, D, delta_bias, scan_intermediates_f, scan_intermediates_b, out_f, out_b)
+                              A, A_b, B, C, D, delta_bias, scan_intermediates_f, scan_intermediates_b, out_f, out_b,
+                              # Feature-SST: Save structured A components for backward
+                              A_blocks if use_structured_A else None,
+                              A_U if use_structured_A else None,
+                              A_V if use_structured_A else None,
+                              A_b_blocks if use_structured_A_b else None,
+                              A_b_U if use_structured_A_b else None,
+                              A_b_V if use_structured_A_b else None)
         return F.linear(rearrange(out_z, "b d l -> b l d"), out_proj_weight, out_proj_bias)
 
     @staticmethod
@@ -1240,7 +1345,8 @@ class BiMambaInnerFn(torch.autograd.Function):
     def backward(ctx, dout):
         # dout: (batch, seqlen, dim)
         (xz, conv1d_weight, conv1d_bias, x_dbl, x_proj_weight, delta_proj_weight, out_proj_weight,
-         conv1d_out, delta, A, A_b, B, C, D, delta_bias, scan_intermediates_f, scan_intermediates_b, out_f, out_b) = ctx.saved_tensors
+         conv1d_out, delta, A, A_b, B, C, D, delta_bias, scan_intermediates_f, scan_intermediates_b, out_f, out_b,
+         A_blocks, A_U, A_V, A_b_blocks, A_b_U, A_b_V) = ctx.saved_tensors
         L = xz.shape[-1]
         delta_rank = delta_proj_weight.shape[1]
         d_state = A.shape[-1] * (1 if not A.is_complex() else 2)
@@ -1259,18 +1365,62 @@ class BiMambaInnerFn(torch.autograd.Function):
         dx, dz = dxz.chunk(2, dim=1)
         dout = rearrange(dout, "b l e -> e (b l)")
         dout_y = rearrange(out_proj_weight.t() @ dout, "d (b l) -> b d l", l=L)
-        dconv1d_out, ddelta, dA, dB, dC, dD, ddelta_bias, dz, out_z_f = selective_scan_cuda.bwd(
-            conv1d_out, delta, A, B, C, D, z, delta_bias, dout_y, scan_intermediates_f, out_f, dz,
-            ctx.delta_softplus,
-            True  # option to recompute out_z
-        )
-        # flip one
-        dz_b = torch.empty_like(dz)
-        dconv1d_out_f_b, ddelta_f_b, dA_b, dB_f_b, dC_f_b, dD_b, ddelta_bias_b, dz_b, out_z_b = selective_scan_cuda.bwd(
-            conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, dout_y.flip([-1]), scan_intermediates_b, out_b, dz_b,
-            ctx.delta_softplus,
-            True  # option to recompute out_z
-        )
+        
+        # Feature-SST: Use structured A in backward if available
+        if ctx.use_structured_A:
+            # Prepare structured A components for forward direction
+            if isinstance(A_blocks, list):
+                A_blocks_tensor = torch.stack([block for block in A_blocks], dim=1)
+            else:
+                A_blocks_tensor = A_blocks
+            A_U_contig = A_U.contiguous() if not A_U.is_contiguous() else A_U
+            A_V_contig = A_V.contiguous() if not A_V.is_contiguous() else A_V
+            
+            # Forward direction backward with structured A
+            dconv1d_out, ddelta, dA, dB, dC, dD, ddelta_bias, dz, out_z_f = selective_scan_cuda.bwd(
+                conv1d_out, delta, A, B, C, D, z, delta_bias, dout_y, scan_intermediates_f, out_f, dz,
+                ctx.delta_softplus, True, 0,  # disc_method_enum = 0 (ZOH)
+                A_blocks_tensor, A_U_contig, A_V_contig, ctx.block_size, ctx.low_rank_rank
+            )
+            
+            # Prepare backward direction structured A components
+            if ctx.use_structured_A_b and A_b_blocks is not None:
+                if isinstance(A_b_blocks, list):
+                    A_b_blocks_tensor = torch.stack([block for block in A_b_blocks], dim=1)
+                else:
+                    A_b_blocks_tensor = A_b_blocks
+                A_b_U_contig = A_b_U.contiguous() if not A_b_U.is_contiguous() else A_b_U
+                A_b_V_contig = A_b_V.contiguous() if not A_b_V.is_contiguous() else A_b_V
+            else:
+                # Use same structured A for backward direction
+                A_b_blocks_tensor = A_blocks_tensor
+                A_b_U_contig = A_U_contig
+                A_b_V_contig = A_V_contig
+            
+            # Backward direction backward with structured A
+            dz_b = torch.empty_like(dz) if z is not None else None
+            dconv1d_out_f_b, ddelta_f_b, dA_b, dB_f_b, dC_f_b, dD_b, ddelta_bias_b, dz_b, out_z_b = selective_scan_cuda.bwd(
+                conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, 
+                z.flip([-1]) if z is not None else None, delta_bias, dout_y.flip([-1]), 
+                scan_intermediates_b, out_b, dz_b,
+                ctx.delta_softplus, True, 0,  # disc_method_enum = 0 (ZOH)
+                A_b_blocks_tensor, A_b_U_contig, A_b_V_contig, ctx.block_size, ctx.low_rank_rank
+            )
+        else:
+            # Standard unidirectional backward (original implementation)
+            dconv1d_out, ddelta, dA, dB, dC, dD, ddelta_bias, dz, out_z_f = selective_scan_cuda.bwd(
+                conv1d_out, delta, A, B, C, D, z, delta_bias, dout_y, scan_intermediates_f, out_f, dz,
+                ctx.delta_softplus,
+                True  # option to recompute out_z
+            )
+            # flip one
+            dz_b = torch.empty_like(dz) if z is not None else None
+            dconv1d_out_f_b, ddelta_f_b, dA_b, dB_f_b, dC_f_b, dD_b, ddelta_bias_b, dz_b, out_z_b = selective_scan_cuda.bwd(
+                conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]) if z is not None else None, 
+                delta_bias, dout_y.flip([-1]), scan_intermediates_b, out_b, dz_b,
+                ctx.delta_softplus,
+                True  # option to recompute out_z
+            )
 
         dconv1d_out = dconv1d_out + dconv1d_out_f_b.flip([-1])
         ddelta = ddelta + ddelta_f_b.flip([-1])
@@ -1337,11 +1487,16 @@ def bimamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True,
+    # Feature-SST: Structured A components
+    A_blocks=None, A_U=None, A_V=None, block_size=0, low_rank_rank=0,
+    A_b_blocks=None, A_b_U=None, A_b_V=None
 ):
     return BiMambaInnerFn.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                               out_proj_weight, out_proj_bias,
-                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus)
+                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus,
+                              A_blocks, A_U, A_V, block_size, low_rank_rank,
+                              A_b_blocks, A_b_U, A_b_V)
 
 
 def mamba_inner_fn_no_out_proj(

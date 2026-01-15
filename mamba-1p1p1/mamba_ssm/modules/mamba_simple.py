@@ -99,6 +99,11 @@ class Mamba(nn.Module):
             assert d_state % block_size == 0, f"d_state ({d_state}) must be divisible by block_size ({block_size})"
             self.num_blocks = d_state // block_size
             assert low_rank_rank < d_state, f"low_rank_rank ({low_rank_rank}) must be < d_state ({d_state})"
+            assert low_rank_rank > 0, f"low_rank_rank ({low_rank_rank}) must be > 0"
+            assert block_size > 0, f"block_size ({block_size}) must be > 0"
+            assert block_size <= 16, f"block_size ({block_size}) must be <= 16 (CUDA kernel limitation)"
+            assert low_rank_rank <= 16, f"low_rank_rank ({low_rank_rank}) must be <= 16 (CUDA kernel limitation)"
+            assert d_state <= 256, f"d_state ({d_state}) must be <= 256 (CUDA kernel limitation)"
         else:
             self.num_blocks = 0
             self.block_size = 0
@@ -427,8 +432,29 @@ class Mamba(nn.Module):
         # In the backward pass we write dx and dz next to each other to avoid torch.cat
         if use_fast_path_actual and inference_params is None:  # Doesn't support outputting the states
             if self.bimamba_type == "v1":
-                # Mamba-3B: Construct bidirectional A matrix
+                # Feature-SST: Construct bidirectional A matrix
                 A_b = self._construct_A_matrix(bidirectional=True)
+                # Feature-SST: Pass structured A components if available
+                A_blocks = None
+                A_U = None
+                A_V = None
+                A_b_blocks = None
+                A_b_U = None
+                A_b_V = None
+                block_size = 0
+                low_rank_rank = 0
+                if (hasattr(self, 'use_block_diagonal_lowrank') and self.use_block_diagonal_lowrank and
+                    hasattr(self, '_A_blocks_structured') and self._A_blocks_structured is not None):
+                    A_blocks = self._A_blocks_structured
+                    A_U = self._A_U_structured
+                    A_V = self._A_V_structured
+                    block_size = self.block_size
+                    low_rank_rank = self.low_rank_rank
+                    # Check if backward direction has separate structured A
+                    if hasattr(self, 'A_b_blocks'):
+                        A_b_blocks = self.A_b_blocks
+                        A_b_U = self.A_b_U
+                        A_b_V = self.A_b_V
                 out = bimamba_inner_fn(
                     xz,
                     self.conv1d.weight,
@@ -444,6 +470,14 @@ class Mamba(nn.Module):
                     self.D.float(),
                     delta_bias=self.dt_proj.bias.float(),
                     delta_softplus=True,
+                    A_blocks=A_blocks,
+                    A_U=A_U,
+                    A_V=A_V,
+                    block_size=block_size,
+                    low_rank_rank=low_rank_rank,
+                    A_b_blocks=A_b_blocks,
+                    A_b_U=A_b_U,
+                    A_b_V=A_b_V,
                 )    
             elif self.bimamba_type == "v2":
                 # Mamba-3B: Construct bidirectional A matrix
