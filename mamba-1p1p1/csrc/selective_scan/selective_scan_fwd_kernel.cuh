@@ -21,6 +21,7 @@ namespace cub = hipcub;
 #include "static_switch.h"
 #include "discretization_kernels.cuh"
 #include "matrix_ops.cuh"
+#include "structured_matrix_ops.cuh"
 
 template <int kNThreads_, int kNItems_, int kNRows_, bool kIsEvenLen_,
           bool kIsVariableB_, bool kIsVariableC_,
@@ -695,39 +696,39 @@ __global__ __launch_bounds__(Ktraits::kNThreads, Ktraits::kMinBlocks) void selec
                 delta_val = delta_val_shared;
                 u_val = u_val_shared;
                 
-                // Feature-SST: Optimized matrix-vector multiplication using block-diagonal + low-rank structure
+                // Feature-SST: Unified state step for all discretization methods
+                // Supports: ZOH, FOH, Bilinear, RK4, Poly, High-order
                 // Compute exp(delta * (blockdiag + UV^T)) @ x_old directly from structured components
                 // This avoids storing the full exp_deltaA matrix in memory!
                 if (threadIdx.x < params.dstate)
                 {
-                    // Compute exp(delta * A) @ x_old using optimized structured operations
-                    float expA_x[MAX_DSTATE];
-                    block_diagonal_lowrank_exp_matrix_vector_mult<float>(
-                        A_blocks_shared,      // Block matrices
-                        A_U_shared,          // Low-rank U
-                        A_V_shared,          // Low-rank V
-                        x_state_shared,      // Input: x_old
-                        expA_x,              // Output: exp(delta * A) @ x_old
-                        delta_val,           // Scaling factor
-                        params.dstate,       // State dimension
-                        params.block_size,   // Block size
-                        params.num_blocks,   // Number of blocks
-                        params.low_rank_rank, // Low-rank rank
-                        10,                  // Taylor series terms
-                        true                 // Use first-order approximation for small delta
-                    );
-                    
-                    // Get result for this thread's state dimension
-                    float new_state = expA_x[threadIdx.x];
-                    
-                    // Add delta * B * u term
+                    // Compute Bu term
+                    float Bu = 0.0f;
                     if constexpr (!kIsVariableB)
                     {
                         float B_val = float(B[threadIdx.x * params.B_dstate_stride]);
-                        new_state += delta_val * B_val * u_val;
+                        Bu = delta_val * B_val * u_val;
                     }
                     
-                    x_state_new[threadIdx.x] = new_state;
+                    // Use unified step function that handles all discretization methods
+                    float x_new_local[SST_MAX_DSTATE];
+                    sst_structured_state_step<float>(
+                        A_blocks_shared,           // Block matrices
+                        A_U_shared,                // Low-rank U
+                        A_V_shared,                // Low-rank V
+                        x_state_shared,            // Input: x_old
+                        x_new_local,               // Output: new state
+                        delta_val,                 // Scaling factor
+                        Bu,                        // B * u term
+                        params.dstate,             // State dimension
+                        params.block_size,         // Block size
+                        params.num_blocks,         // Number of blocks
+                        params.low_rank_rank,      // Low-rank rank
+                        params.discretization_method, // Discretization method (ZOH, FOH, Bilinear, etc.)
+                        10                         // Taylor series terms
+                    );
+                    
+                    x_state_new[threadIdx.x] = x_new_local[threadIdx.x];
                 }
                 __syncthreads();
                 

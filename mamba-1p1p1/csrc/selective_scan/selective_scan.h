@@ -115,6 +115,11 @@ struct SSMParamsBwd: public SSMParamsBase {
     index_t ddelta_batch_stride;
     index_t ddelta_d_stride;
 
+    // Feature-SST: Strides for structured A gradient tensors
+    index_t dA_blocks_stride;  // Stride for dA_blocks: (d_inner, num_blocks, block_size, block_size)
+    index_t dA_U_stride;       // Stride for dA_U: (d_inner, d_state, low_rank_rank)
+    index_t dA_V_stride;       // Stride for dA_V: (d_inner, d_state, low_rank_rank)
+
     // Common data pointers.
     void *__restrict__ dout_ptr;
     void *__restrict__ dA_ptr;
@@ -125,4 +130,9 @@ struct SSMParamsBwd: public SSMParamsBase {
     void *__restrict__ dz_ptr;
     void *__restrict__ ddelta_ptr;
     void *__restrict__ ddelta_bias_ptr;
+    
+    // Feature-SST: Block-diagonal + low-rank A gradient pointers
+    void *__restrict__ dA_blocks_ptr;  // (d_inner, num_blocks, block_size, block_size)
+    void *__restrict__ dA_U_ptr;       // (d_inner, d_state, low_rank_rank)
+    void *__restrict__ dA_V_ptr;       // (d_inner, d_state, low_rank_rank)
 };
