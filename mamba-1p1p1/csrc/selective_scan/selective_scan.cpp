@@ -322,6 +322,318 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
     }
 }
 
+// Feature-SST: Set up bidirectional backward parameters
+void set_ssm_params_bidirectional_bwd(SSMParamsBidirectional &params,
+                                      const size_t batch,
+                                      const size_t dim,
+                                      const size_t seqlen,
+                                      const size_t dstate,
+                                      const size_t n_groups,
+                                      const size_t n_chunks,
+                                      const bool is_variable_B,
+                                      const bool is_variable_C,
+                                      // Forward direction tensors
+                                      const at::Tensor &u,
+                                      const at::Tensor &delta,
+                                      const at::Tensor &A,
+                                      const at::Tensor &B,
+                                      const at::Tensor &C,
+                                      const at::Tensor &dout,
+                                      const c10::optional<at::Tensor> &x_,
+                                      const c10::optional<at::Tensor> &out_,
+                                      const c10::optional<at::Tensor> &D_,
+                                      const c10::optional<at::Tensor> &z_,
+                                      const c10::optional<at::Tensor> &delta_bias_,
+                                      c10::optional<at::Tensor> &dz_,
+                                      bool has_z,
+                                      bool delta_softplus,
+                                      bool recompute_out_z,
+                                      DiscretizationMethod discretization_method,
+                                      // Feature-SST: Structured A parameters (forward)
+                                      const c10::optional<at::Tensor> &A_blocks_,
+                                      const c10::optional<at::Tensor> &A_U_,
+                                      const c10::optional<at::Tensor> &A_V_,
+                                      int block_size,
+                                      int low_rank_rank,
+                                      // Feature-SST: Structured A gradient tensors (forward)
+                                      const c10::optional<at::Tensor> &dA_fwd_blocks_,
+                                      const c10::optional<at::Tensor> &dA_fwd_U_,
+                                      const c10::optional<at::Tensor> &dA_fwd_V_,
+                                      // Backward direction tensors (optional, if separate)
+                                      const c10::optional<at::Tensor> &A_b_,
+                                      const c10::optional<at::Tensor> &A_b_blocks_,
+                                      const c10::optional<at::Tensor> &A_b_U_,
+                                      const c10::optional<at::Tensor> &A_b_V_,
+                                      const c10::optional<at::Tensor> &B_b_,
+                                      const c10::optional<at::Tensor> &C_b_,
+                                      const c10::optional<at::Tensor> &x_bwd_,
+                                      const c10::optional<at::Tensor> &dout_fwd_,
+                                      const c10::optional<at::Tensor> &dout_bwd_,
+                                      // Feature-SST: Structured A gradient tensors (backward, if separate)
+                                      const c10::optional<at::Tensor> &dA_bwd_blocks_,
+                                      const c10::optional<at::Tensor> &dA_bwd_U_,
+                                      const c10::optional<at::Tensor> &dA_bwd_V_,
+                                      // Gradient output tensors
+                                      at::Tensor &du,
+                                      at::Tensor &ddelta,
+                                      at::Tensor &dA,
+                                      at::Tensor &dB,
+                                      at::Tensor &dC,
+                                      void* dD_ptr,
+                                      void* ddelta_bias_ptr) {
+    // Initialize base parameters (forward direction)
+    set_ssm_params_fwd(params, batch, dim, seqlen, dstate, n_groups, n_chunks, is_variable_B, is_variable_C,
+                       u, delta, A, B, C, has_z ? (out_.has_value() ? out_.value() : dout) : dout,
+                       has_z ? (z_.has_value() ? z_.value() : dout) : dout,
+                       recompute_out_z ? (out_.has_value() ? out_.value() : dout) : dout,
+                       D_.has_value() ? D_.value().data_ptr() : nullptr,
+                       delta_bias_.has_value() ? delta_bias_.value().data_ptr() : nullptr,
+                       x_.has_value() ? x_.value().data_ptr() : nullptr,
+                       has_z, delta_softplus, discretization_method,
+                       A_blocks_, A_U_, A_V_, block_size, low_rank_rank);
+    
+    if (!recompute_out_z) { params.out_z_ptr = nullptr; }
+    
+    // Set backward pass pointers (from SSMParamsBwd)
+    params.dout_ptr = dout.data_ptr();
+    params.du_ptr = du.data_ptr();
+    params.dA_ptr = dA.data_ptr();
+    params.dB_ptr = dB.data_ptr();
+    params.dC_ptr = dC.data_ptr();
+    params.dD_ptr = dD_ptr;
+    params.ddelta_ptr = ddelta.data_ptr();
+    params.ddelta_bias_ptr = ddelta_bias_ptr;
+    params.dz_ptr = has_z ? (dz_.has_value() ? dz_.value().data_ptr() : nullptr) : nullptr;
+    
+    // Set backward pass strides
+    params.dout_batch_stride = dout.stride(0);
+    params.dout_d_stride = dout.stride(1);
+    params.dA_d_stride = dA.stride(0);
+    params.dA_dstate_stride = dA.stride(1);
+    if (!is_variable_B) {
+        params.dB_d_stride = dB.stride(0);
+    } else {
+        params.dB_batch_stride = dB.stride(0);
+        params.dB_group_stride = dB.stride(1);
+    }
+    params.dB_dstate_stride = !is_variable_B ? dB.stride(1) : dB.stride(2);
+    if (!is_variable_C) {
+        params.dC_d_stride = dC.stride(0);
+    } else {
+        params.dC_batch_stride = dC.stride(0);
+        params.dC_group_stride = dC.stride(1);
+    }
+    params.dC_dstate_stride = !is_variable_C ? dC.stride(1) : dC.stride(2);
+    params.du_batch_stride = du.stride(0);
+    params.du_d_stride = du.stride(1);
+    params.ddelta_batch_stride = ddelta.stride(0);
+    params.ddelta_d_stride = ddelta.stride(1);
+    if (has_z && dz_.has_value()) {
+        params.dz_batch_stride = dz_.value().stride(0);
+        params.dz_d_stride = dz_.value().stride(1);
+    }
+    
+    // Feature-SST: Set structured A gradient pointers (forward)
+    if (dA_fwd_blocks_.has_value() && dA_fwd_U_.has_value() && dA_fwd_V_.has_value()) {
+        params.dA_fwd_blocks_ptr = dA_fwd_blocks_.value().data_ptr();
+        params.dA_fwd_U_ptr = dA_fwd_U_.value().data_ptr();
+        params.dA_fwd_V_ptr = dA_fwd_V_.value().data_ptr();
+        params.dA_blocks_stride = dA_fwd_blocks_.value().stride(0);
+        params.dA_U_stride = dA_fwd_U_.value().stride(0);
+        params.dA_V_stride = dA_fwd_V_.value().stride(0);
+    } else {
+        params.dA_fwd_blocks_ptr = nullptr;
+        params.dA_fwd_U_ptr = nullptr;
+        params.dA_fwd_V_ptr = nullptr;
+    }
+    
+    // Set bidirectional-specific fields
+    params.out_fwd_ptr = out_.has_value() ? out_.value().data_ptr() : nullptr;
+    params.out_bwd_ptr = nullptr;  // Backward output (if separate)
+    params.x_bwd_ptr = x_bwd_.has_value() ? x_bwd_.value().data_ptr() : nullptr;
+    params.dout_fwd_ptr = dout_fwd_.has_value() ? dout_fwd_.value().data_ptr() : nullptr;
+    params.dout_bwd_ptr = dout_bwd_.has_value() ? dout_bwd_.value().data_ptr() : nullptr;
+    
+    // Check if backward direction has separate A matrices
+    bool use_structured_A_b = (A_b_blocks_.has_value() && A_b_U_.has_value() && A_b_V_.has_value() 
+                               && block_size > 0 && low_rank_rank > 0);
+    params.use_structured_A_b = use_structured_A_b;
+    
+    if (use_structured_A_b) {
+        params.block_size_b = block_size;
+        params.low_rank_rank_b = low_rank_rank;
+        params.num_blocks_b = dstate / block_size;
+        
+        params.A_b_blocks_ptr = A_b_blocks_.value().data_ptr();
+        params.A_b_U_ptr = A_b_U_.value().data_ptr();
+        params.A_b_V_ptr = A_b_V_.value().data_ptr();
+        params.A_b_block_stride = A_b_blocks_.value().stride(0);
+        params.A_b_U_stride = A_b_U_.value().stride(0);
+        params.A_b_V_stride = A_b_V_.value().stride(0);
+        
+        // Set backward A gradient pointers (if separate)
+        if (dA_bwd_blocks_.has_value() && dA_bwd_U_.has_value() && dA_bwd_V_.has_value()) {
+            params.dA_bwd_blocks_ptr = dA_bwd_blocks_.value().data_ptr();
+            params.dA_bwd_U_ptr = dA_bwd_U_.value().data_ptr();
+            params.dA_bwd_V_ptr = dA_bwd_V_.value().data_ptr();
+        } else {
+            params.dA_bwd_blocks_ptr = nullptr;
+            params.dA_bwd_U_ptr = nullptr;
+            params.dA_bwd_V_ptr = nullptr;
+        }
+    } else {
+        // Use same A for both directions
+        params.use_structured_A_b = false;
+        params.A_b_blocks_ptr = nullptr;
+        params.A_b_U_ptr = nullptr;
+        params.A_b_V_ptr = nullptr;
+        params.dA_bwd_blocks_ptr = nullptr;
+        params.dA_bwd_U_ptr = nullptr;
+        params.dA_bwd_V_ptr = nullptr;
+    }
+    
+    // Set backward B and C pointers (if separate)
+    params.B_b_ptr = B_b_.has_value() ? B_b_.value().data_ptr() : nullptr;
+    params.C_b_ptr = C_b_.has_value() ? C_b_.value().data_ptr() : nullptr;
+    
+    params.concat_bidirectional = false;  // Default to addition, not concatenation
+}
+
+// Feature-SST: Bidirectional backward C++ binding
+std::vector<at::Tensor>
+selective_scan_bidirectional_bwd(const at::Tensor &u, const at::Tensor &delta,
+                                  const at::Tensor &A, const at::Tensor &B, const at::Tensor &C,
+                                  const c10::optional<at::Tensor> &D_,
+                                  const c10::optional<at::Tensor> &z_,
+                                  const c10::optional<at::Tensor> &delta_bias_,
+                                  const at::Tensor &dout,
+                                  const c10::optional<at::Tensor> &x_,
+                                  const c10::optional<at::Tensor> &out_,
+                                  c10::optional<at::Tensor> &dz_,
+                                  bool delta_softplus,
+                                  bool recompute_out_z,
+                                  int discretization_method = 0,
+                                  // Feature-SST: Structured A parameters
+                                  const c10::optional<at::Tensor> &A_blocks_,
+                                  const c10::optional<at::Tensor> &A_U_,
+                                  const c10::optional<at::Tensor> &A_V_,
+                                  int block_size,
+                                  int low_rank_rank,
+                                  // Backward direction A (optional, if separate)
+                                  const c10::optional<at::Tensor> &A_b_,
+                                  const c10::optional<at::Tensor> &A_b_blocks_,
+                                  const c10::optional<at::Tensor> &A_b_U_,
+                                  const c10::optional<at::Tensor> &A_b_V_,
+                                  const c10::optional<at::Tensor> &B_b_,
+                                  const c10::optional<at::Tensor> &C_b_,
+                                  const c10::optional<at::Tensor> &x_bwd_,
+                                  const c10::optional<at::Tensor> &dout_fwd_,
+                                  const c10::optional<at::Tensor> &dout_bwd_) {
+    // Check if structured A is being used
+    bool use_structured_A = (A_blocks_.has_value() && A_U_.has_value() && A_V_.has_value() 
+                              && block_size > 0 && low_rank_rank > 0);
+    
+    if (!use_structured_A) {
+        // Fallback to standard unidirectional backward
+        // This would call selective_scan_bwd instead
+        AT_ERROR("selective_scan_bidirectional_bwd requires structured A matrices");
+    }
+    
+    const auto batch_size = u.size(0);
+    const auto dim = u.size(1);
+    const auto seqlen = u.size(2);
+    const auto dstate = A.size(-1) * (A.is_complex() ? 2 : 1);
+    const auto n_groups = 1;
+    const auto n_chunks = (seqlen + 31) / 32;
+    const bool is_variable_B = B.dim() == 4;
+    const bool is_variable_C = C.dim() == 4;
+    const bool has_z = z_.has_value();
+    
+    // Determine weight type
+    using weight_t = std::conditional_t<std::is_same_v<at::ScalarType, at::ScalarType::ComplexFloat>, complex_t, float>;
+    const auto weight_type = A.scalar_type();
+    
+    // Allocate gradient tensors
+    auto du = torch::zeros_like(u);
+    auto ddelta = torch::zeros_like(delta);
+    auto dA = torch::zeros_like(A);
+    auto dB = torch::zeros_like(B);
+    auto dC = torch::zeros_like(C);
+    void* dD_ptr = nullptr;
+    void* ddelta_bias_ptr = nullptr;
+    if (D_.has_value()) {
+        dD_ptr = const_cast<void*>(D_.value().data_ptr());  // Will be set to gradient tensor
+    }
+    if (delta_bias_.has_value()) {
+        ddelta_bias_ptr = const_cast<void*>(delta_bias_.value().data_ptr());  // Will be set to gradient tensor
+    }
+    
+    // Feature-SST: Allocate structured A gradient tensors (forward)
+    at::Tensor dA_fwd_blocks, dA_fwd_U, dA_fwd_V;
+    if (use_structured_A) {
+        dA_fwd_blocks = torch::zeros_like(A_blocks_.value());
+        dA_fwd_U = torch::zeros_like(A_U_.value());
+        dA_fwd_V = torch::zeros_like(A_V_.value());
+    }
+    
+    // Feature-SST: Allocate structured A gradient tensors (backward, if separate)
+    at::Tensor dA_bwd_blocks, dA_bwd_U, dA_bwd_V;
+    bool use_structured_A_b = (A_b_blocks_.has_value() && A_b_U_.has_value() && A_b_V_.has_value() 
+                                 && block_size > 0 && low_rank_rank > 0);
+    if (use_structured_A_b) {
+        dA_bwd_blocks = torch::zeros_like(A_b_blocks_.value());
+        dA_bwd_U = torch::zeros_like(A_b_U_.value());
+        dA_bwd_V = torch::zeros_like(A_b_V_.value());
+    }
+    
+    // Set up parameters
+    SSMParamsBidirectional params;
+    DiscretizationMethod disc_method = static_cast<DiscretizationMethod>(discretization_method);
+    set_ssm_params_bidirectional_bwd(params, batch_size, dim, seqlen, dstate, n_groups, n_chunks,
+                                     is_variable_B, is_variable_C,
+                                     u, delta, A, B, C, dout, x_, out_,
+                                     D_, z_, delta_bias_, dz_,
+                                     has_z, delta_softplus, recompute_out_z, disc_method,
+                                     A_blocks_, A_U_, A_V_, block_size, low_rank_rank,
+                                     dA_fwd_blocks, dA_fwd_U, dA_fwd_V,
+                                     A_b_, A_b_blocks_, A_b_U_, A_b_V_,
+                                     B_b_, C_b_, x_bwd_, dout_fwd_, dout_bwd_,
+                                     use_structured_A_b ? dA_bwd_blocks : c10::optional<at::Tensor>(),
+                                     use_structured_A_b ? dA_bwd_U : c10::optional<at::Tensor>(),
+                                     use_structured_A_b ? dA_bwd_V : c10::optional<at::Tensor>(),
+                                     du, ddelta, dA, dB, dC, dD_ptr, ddelta_bias_ptr);
+    
+    // Launch CUDA kernel
+    at::cuda::CUDAGuard device_guard{(char)u.get_device()};
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(u.scalar_type(), "selective_scan_bidirectional_bwd", [&] {
+        DISPATCH_WTYPE_FLOAT_AND_COMPLEX(A.scalar_type(), "selective_scan_bidirectional_bwd", [&] {
+            selective_scan_bidirectional_bwd_cuda<input_t, weight_t>(params, stream);
+        });
+    });
+    
+    // Return gradients
+    std::vector<at::Tensor> result = {du, ddelta, dA, dB.to(B.dtype()), dC.to(C.dtype())};
+    if (D_.has_value()) { result.push_back(torch::zeros_like(D_.value())); }  // dD placeholder
+    if (delta_bias_.has_value()) { result.push_back(torch::zeros_like(delta_bias_.value())); }  // ddelta_bias placeholder
+    if (has_z) { result.push_back(dz_.has_value() ? dz_.value() : torch::zeros_like(z_.value())); }
+    if (recompute_out_z) { result.push_back(out_.has_value() ? out_.value() : torch::zeros_like(dout)); }
+    
+    // Feature-SST: Include structured A gradients
+    if (use_structured_A) {
+        result.push_back(dA_fwd_blocks);
+        result.push_back(dA_fwd_U);
+        result.push_back(dA_fwd_V);
+    }
+    if (use_structured_A_b) {
+        result.push_back(dA_bwd_blocks);
+        result.push_back(dA_bwd_U);
+        result.push_back(dA_bwd_V);
+    }
+    
+    return result;
+}
+
 std::vector<at::Tensor>
 selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                   const at::Tensor &A, const at::Tensor &B, const at::Tensor &C,
@@ -648,4 +960,19 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           py::arg("recompute_out_z") = false, py::arg("discretization_method") = 0,
           py::arg("A_blocks") = py::none(), py::arg("A_U") = py::none(), py::arg("A_V") = py::none(),
           py::arg("block_size") = 0, py::arg("low_rank_rank") = 0);
+    
+    // Feature-SST: Bidirectional backward pass
+    m.def("bidirectional_bwd", &selective_scan_bidirectional_bwd, "Selective scan bidirectional backward",
+          py::arg("u"), py::arg("delta"), py::arg("A"), py::arg("B"), py::arg("C"),
+          py::arg("D") = py::none(), py::arg("z") = py::none(),
+          py::arg("delta_bias") = py::none(), py::arg("dout"),
+          py::arg("x") = py::none(), py::arg("out") = py::none(),
+          py::arg("dz") = py::none(), py::arg("delta_softplus") = false,
+          py::arg("recompute_out_z") = false, py::arg("discretization_method") = 0,
+          py::arg("A_blocks") = py::none(), py::arg("A_U") = py::none(), py::arg("A_V") = py::none(),
+          py::arg("block_size") = 0, py::arg("low_rank_rank") = 0,
+          py::arg("A_b") = py::none(), py::arg("A_b_blocks") = py::none(),
+          py::arg("A_b_U") = py::none(), py::arg("A_b_V") = py::none(),
+          py::arg("B_b") = py::none(), py::arg("C_b") = py::none(),
+          py::arg("x_bwd") = py::none(), py::arg("dout_fwd") = py::none(), py::arg("dout_bwd") = py::none());
 }
