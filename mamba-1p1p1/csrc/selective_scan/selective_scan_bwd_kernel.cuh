@@ -377,10 +377,13 @@ void selective_scan_bwd_kernel(SSMParamsBwd params) {
                 }
                 __syncthreads();
                 
-                // Gradient through state transition: x_new = exp(delta*A) @ x_old + delta*B*u
-                // Need gradients w.r.t. A_blocks, A_U, A_V, delta, B, u, x_old
-                // IMPROVED: More accurate gradient computation using exp(delta*A)^T
-                if (threadIdx.x < params.dstate)
+                    // Gradient through state transition
+                    // Forward: x_new = f(delta, A, x_old, B, u) where f depends on discretization method
+                    // Need gradients w.r.t. A_blocks, A_U, A_V, delta, B, u, x_old
+                    // IMPROVED: More accurate gradient computation using exp(delta*A)^T
+                    // NOTE: Currently uses improved ZOH-like gradients for all methods
+                    // Method-specific gradients (FOH, Bilinear, RK4, etc.) are planned for future improvement
+                    if (threadIdx.x < params.dstate)
                 {
                     float B_val = 0.0f;
                     if constexpr (!kIsVariableB)

@@ -105,6 +105,8 @@ Reduction = (1 - 384/768) × 100% = 50%
 
 ### 3.1 Matrix Exponential: exp(δA)
 
+**Note**: This analysis focuses on ZOH (Zero-Order Hold) discretization. Other methods (FOH, Bilinear, RK4, Poly, Highorder) are supported but may have different complexity characteristics.
+
 #### Traditional Approach
 
 For dense matrix `A ∈ ℝ^(d_state × d_state)`:
@@ -448,6 +450,8 @@ void block_diagonal_lowrank_matrix_vector_mult(
 
 **Key Innovation**: Compute `exp(δA) @ x` directly without storing `exp(δA)`:
 
+**Note**: This implementation supports all 6 discretization methods (ZOH, FOH, Bilinear, RK4, Poly, Highorder) for structured A matrices. Variable B and C are fully supported. Complex number support is available via templates.
+
 ```cpp
 void block_diagonal_lowrank_exp_matrix_vector_mult(
     float* A_blocks, float* U, float* V,
@@ -531,7 +535,7 @@ void block_diagonal_lowrank_exp_matrix_vector_mult(
 
 1. **Tunable parameters**: Adjust `block_size` and `rank` for different trade-offs
 2. **Adaptive accuracy**: Switch between first-order and higher-order approximations
-3. **Backward compatibility**: Can fall back to full matrix if needed
+3. **No fallback needed**: Structured A is the only path - no full matrix construction
 
 ---
 
@@ -571,7 +575,8 @@ The optimized implementation is more complex than the traditional approach.
 **Mitigation:**
 - Well-documented code
 - Comprehensive testing
-- Fallback to traditional method if needed
+- CUDA-optimized kernels (no Python fallback for structured A)
+- Variable B/C support adds minimal complexity overhead
 
 ---
 
@@ -603,7 +608,34 @@ Extend to sparse blocks within the block-diagonal structure for even more effici
 
 ---
 
-## 10. Conclusion
+## 10. Implementation Status
+
+### Current Implementation Features
+
+- ✅ **Forward Pass**: All 6 discretization methods (ZOH, FOH, Bilinear, RK4, Poly, Highorder)
+- ✅ **Backward Pass**: Full gradient computation with improved accuracy
+- ✅ **Variable B/C**: Supported in both forward and backward passes
+- ✅ **Complex Numbers**: Full support via templates
+- ✅ **Bidirectional Forward**: Implemented
+- ⚠️ **Bidirectional Backward**: Not yet implemented
+- ⚠️ **Method-Specific Gradients**: Currently uses improved ZOH-like gradients for all methods
+
+**Note**: For detailed implementation status, see `FEATURE_SST_IMPLEMENTATION.md`.
+
+### Approximation Methods
+
+**Default**: Improved gradient computation using explicit `A @ x_old` calculation
+- More accurate than pure first-order: `exp(δA)^T ≈ I + δA^T`
+- Computes structured matrix-vector products explicitly
+- Handles variable B and C per time step
+
+**Available**: Higher-order approximations for low-rank component
+- First-order: `exp(δ·UV^T) ≈ I + δ·UV^T`
+- Higher-order: `exp(δ·UV^T) ≈ U×exp(δV^T U)×V^T`
+
+---
+
+## 11. Conclusion
 
 The structured matrix optimizations provide:
 
@@ -611,6 +643,7 @@ The structured matrix optimizations provide:
 2. **50-90% memory reduction** depending on configuration
 3. **Better scalability** with state dimension
 4. **Maintained accuracy** through controlled approximations
+5. **No full matrix construction** - all operations use structured components directly
 
 These optimizations make the Feature-SST architecture practical for real-world applications while maintaining the expressiveness needed for complex temporal modeling.
 
