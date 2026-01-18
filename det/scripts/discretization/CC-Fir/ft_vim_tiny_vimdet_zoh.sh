@@ -1,5 +1,22 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba detection on MS-COCO
+#
+# Usage: ./ft_vim_tiny_vimdet_zoh.sh [DATASET_PATH]
+#   DATASET_PATH: Path to coco directory (e.g., /path/to/coco)
+#                 If not provided, defaults to ./datasets
+#   Note: Detectron2 expects COCO at ${DETECTRON2_DATASETS}/coco/
+
+# Get dataset path from command line argument or use default
+# Expected structure: ${DETECTRON2_DATASETS}/coco/ (so we use parent of coco directory)
+if [ -z "$1" ]; then
+    DETECTRON2_DATASETS="./datasets"
+    echo "No dataset path provided, using default: ${DETECTRON2_DATASETS}"
+else
+    DETECTRON2_DATASETS="$(dirname "${1}")"
+    echo "Using datasets root: ${DETECTRON2_DATASETS} (COCO at ${DETECTRON2_DATASETS}/coco/)"
+fi
+
+export DETECTRON2_DATASETS
 
 # Generate unique port based on SLURM job ID (if available) or use process ID
 # Port range: 29500-29999 (500 ports available)
@@ -24,4 +41,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     dataloader.train.num_workers=16 \
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=zoh
-    # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \
