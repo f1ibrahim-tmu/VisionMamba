@@ -1,5 +1,19 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba segmentation on ADE20K
+#
+# Usage: ./ft_vim_tiny_upernet_zoh.sh [DATASET_PATH]
+#   DATASET_PATH: Path to ade20k directory (e.g., /path/to/ade20k)
+#                 If not provided, defaults to /home/f7ibrahi/scratch/dataset/ade20k/ADEChallengeData2016
+
+# Get dataset path from command line argument or use default
+# Expected structure: ${DATASET_PATH}/ADEChallengeData2016/
+if [ -z "$1" ]; then
+    ADE20K_DATASET_PATH="/home/f7ibrahi/scratch/dataset/ade20k/ADEChallengeData2016"
+    echo "No dataset path provided, using default: ${ADE20K_DATASET_PATH}"
+else
+    ADE20K_DATASET_PATH="${1}/ADEChallengeData2016"
+    echo "Using dataset path: ${ADE20K_DATASET_PATH}"
+fi
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/vim_tiny_zoh/best_checkpoint.pth
@@ -38,4 +52,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --ma
              model.backbone.discretization_method=zoh \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
+             data.train.data_root="${ADE20K_DATASET_PATH}" \
+             data.val.data_root="${ADE20K_DATASET_PATH}" \
+             data.test.data_root="${ADE20K_DATASET_PATH}" \
     ${RESUME_ARG}
