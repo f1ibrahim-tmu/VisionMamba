@@ -43,7 +43,7 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port $MASTER_PORT \
-    seg/train.py --launcher slurm \
+    seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
@@ -52,8 +52,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
              model.backbone.discretization_method=zoh \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
-             data.train.data_root="${ADE20K_DATASET_PATH}" \
-             data.val.data_root="${ADE20K_DATASET_PATH}" \
-             data.test.data_root="${ADE20K_DATASET_PATH}" \
+             data.train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             data.val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             data.test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
     --work-dir output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
     ${RESUME_ARG}
