@@ -1256,10 +1256,13 @@ def bimamba_inner_fn(
 def mamba_inner_fn_no_out_proj(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, checkpoint_lvl=None
 ):
+    import os
+    if checkpoint_lvl is None:
+        checkpoint_lvl = int(os.environ.get("MAMBA_CHECKPOINT_LVL", "1"))
     return MambaInnerFnNoOutProj.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
-                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus)
+                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl)
 
 
 def mamba_inner_ref(
