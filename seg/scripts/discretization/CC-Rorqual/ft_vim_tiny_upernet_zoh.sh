@@ -52,7 +52,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --ma
              model.backbone.discretization_method=zoh \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
-             data.train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
-             data.val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
-             data.test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
     ${RESUME_ARG}
