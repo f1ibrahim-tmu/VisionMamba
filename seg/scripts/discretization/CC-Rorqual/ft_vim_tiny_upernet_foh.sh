@@ -37,7 +37,8 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --master_port $MASTER_PORT \
     seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
-    --seed 0 --work-dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_foh --deterministic \
+    --seed 0 \
+    --work-dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_foh \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
