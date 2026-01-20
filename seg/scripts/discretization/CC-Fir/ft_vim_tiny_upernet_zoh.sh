@@ -40,8 +40,8 @@ export MASTER_PORT
 
 echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-# Use SLURM launcher - it will read SLURM environment variables automatically
-python seg/train.py --launcher slurm \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port $MASTER_PORT \
+    seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
     --seed 0 --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
