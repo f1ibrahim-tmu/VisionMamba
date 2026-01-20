@@ -908,7 +908,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
         return (dxz, dconv1d_weight, dconv1d_bias, dx_proj_weight, ddelta_proj_weight,
                 dA, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None)
     
 
 class MambaInnerFn(torch.autograd.Function):
@@ -1059,7 +1059,7 @@ class MambaInnerFn(torch.autograd.Function):
                 dout_proj_weight, dout_proj_bias,
                 dA, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None)
 
 
 class BiMambaInnerFn(torch.autograd.Function):
@@ -1230,7 +1230,7 @@ class BiMambaInnerFn(torch.autograd.Function):
                 dout_proj_weight, dout_proj_bias,
                 dA, dA_b, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None)
 
 def mamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
