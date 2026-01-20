@@ -16,7 +16,7 @@ else
 fi
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_foh.py
-PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/vim_tiny_foh/best_checkpoint.pth
+PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_foh/best_checkpoint.pth
 # Generate unique port based on SLURM job ID (if available) or use process ID
 # Port range: 29500-29999 (500 ports available)
 if [ -n "$SLURM_JOB_ID" ]; then
