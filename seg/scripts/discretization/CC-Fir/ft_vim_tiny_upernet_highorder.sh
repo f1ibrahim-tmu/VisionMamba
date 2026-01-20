@@ -1,5 +1,19 @@
 #!/bin/bash
 # Higher-Order Hold discretization for Vision Mamba segmentation on ADE20K
+#
+# Usage: ./ft_vim_tiny_upernet_highorder.sh [DATASET_PATH]
+#   DATASET_PATH: Path to ade20k directory (e.g., /path/to/ade20k)
+#                 If not provided, defaults to /home/f7ibrahi/scratch/dataset/ade20k/ADEChallengeData2016
+
+# Get dataset path from command line argument or use default
+# Expected structure: ${DATASET_PATH}/ADEChallengeData2016/
+if [ -z "$1" ]; then
+    ADE20K_DATASET_PATH="/home/f7ibrahi/scratch/dataset/ade20k/ADEChallengeData2016"
+    echo "No dataset path provided, using default: ${ADE20K_DATASET_PATH}"
+else
+    ADE20K_DATASET_PATH="${1}/ADEChallengeData2016"
+    echo "Using dataset path: ${ADE20K_DATASET_PATH}"
+fi
 
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
@@ -41,5 +55,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
              model.backbone.discretization_method=highorder \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
+             train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
     --work-dir output/segmentation_logs/vim_tiny_vimseg_upernet_highorder \
     ${RESUME_ARG}
