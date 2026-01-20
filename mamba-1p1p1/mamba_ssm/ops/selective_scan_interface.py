@@ -771,7 +771,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
     @_custom_fwd(device_type='cuda')
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
+                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh"):
         """
              xz: (batch, dim, seqlen)
         """
@@ -824,8 +824,16 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
         if D is not None:
             D = D.contiguous()
         # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
-        # Default to zoh (0) for MambaInnerFnNoOutProj
-        disc_method_enum = 0
+        # Map discretization method string to enum value
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
@@ -902,7 +910,7 @@ class MambaInnerFnNoOutProj(torch.autograd.Function):
         return (dxz, dconv1d_weight, dconv1d_bias, dx_proj_weight, ddelta_proj_weight,
                 dA, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None, None)
     
 
 class MambaInnerFn(torch.autograd.Function):
@@ -1256,10 +1264,13 @@ def bimamba_inner_fn(
 def mamba_inner_fn_no_out_proj(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, checkpoint_lvl=None, discretization_method="zoh"
 ):
+    import os
+    if checkpoint_lvl is None:
+        checkpoint_lvl = int(os.environ.get("MAMBA_CHECKPOINT_LVL", "1"))
     return MambaInnerFnNoOutProj.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
-                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus)
+                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl, discretization_method)
 
 
 def mamba_inner_ref(
