@@ -40,10 +40,8 @@ export MASTER_PORT
 
 echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-# CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
-
-CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --master_port $MASTER_PORT \
-    seg/train.py --launcher slurm \
+# Use SLURM launcher - it will read SLURM environment variables automatically
+python seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
     --seed 0 --work-dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \

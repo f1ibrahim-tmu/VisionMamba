@@ -235,6 +235,7 @@ class Mamba(nn.Module):
                     self.D.float(),
                     delta_bias=self.dt_proj.bias.float(),
                     delta_softplus=True,
+                    discretization_method=self.discretization_method,
                 )
                 out_b = mamba_inner_fn_no_out_proj(
                     xz.flip([-1]),
@@ -248,6 +249,7 @@ class Mamba(nn.Module):
                     self.D_b.float(),
                     delta_bias=self.dt_proj_b.bias.float(),
                     delta_softplus=True,
+                    discretization_method=self.discretization_method,
                 )
                 # F.linear(rearrange(out_z, "b d l -> b l d"), out_proj_weight, out_proj_bias)
                 if not self.if_divide_out:
