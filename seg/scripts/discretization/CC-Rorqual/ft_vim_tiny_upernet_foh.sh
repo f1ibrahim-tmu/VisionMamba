@@ -15,6 +15,9 @@ else
     echo "Using dataset path: ${ADE20K_DATASET_PATH}"
 fi
 
+# Required for deterministic mode with CuBLAS
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_foh.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_foh/best_checkpoint.pth
 # Generate unique port based on SLURM job ID (if available) or use process ID
