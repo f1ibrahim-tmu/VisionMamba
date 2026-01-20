@@ -28,16 +28,64 @@ else
 fi
 export MASTER_PORT
 
+# Multi-node setup
+# Get the number of GPUs per node from SLURM
+GPUS_PER_NODE=${SLURM_GPUS_ON_NODE:-2}
+# Get the number of nodes
+NUM_NODES=${SLURM_JOB_NUM_NODES:-1}
+# Get the node rank
+NODE_RANK=${SLURM_PROCID:-0}
+# Get master address (first node in the allocation)
+if [ -z "$MASTER_ADDR" ]; then
+    if [ -n "$SLURM_JOB_NODELIST" ]; then
+        # Extract first hostname from SLURM_JOB_NODELIST
+        MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+    else
+        MASTER_ADDR="localhost"
+    fi
+fi
+export MASTER_ADDR
+
 echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
+echo "Multi-node setup: $NUM_NODES nodes, $GPUS_PER_NODE GPUs per node"
+echo "Node rank: $NODE_RANK, Master address: $MASTER_ADDR"
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port $MASTER_PORT \
-    det/tools/lazyconfig_train_net.py \
-    --config-file ${DET_CONFIG} \
-    train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
-    train.init_checkpoint="" \
-    dataloader.train.num_workers=16 \
-    dataloader.test.num_workers=8 \
-    model.backbone.net.discretization_method=zoh
+# Set CUDA_VISIBLE_DEVICES to use all GPUs assigned by SLURM
+# SLURM automatically sets CUDA_VISIBLE_DEVICES, but we ensure it's set correctly
+if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
+    # If not set by SLURM, use all GPUs on this node
+    CUDA_VISIBLE_DEVICES=$(seq -s, 0 $((GPUS_PER_NODE - 1)))
+fi
+export CUDA_VISIBLE_DEVICES
+
+# For multi-node training, use torch.distributed.run with proper node configuration
+if [ "$NUM_NODES" -gt 1 ]; then
+    python -m torch.distributed.run \
+        --nproc_per_node=$GPUS_PER_NODE \
+        --nnodes=$NUM_NODES \
+        --node_rank=$NODE_RANK \
+        --master_addr=$MASTER_ADDR \
+        --master_port=$MASTER_PORT \
+        det/tools/lazyconfig_train_net.py \
+        --config-file ${DET_CONFIG} \
+        train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
+        train.init_checkpoint="" \
+        dataloader.train.num_workers=16 \
+        dataloader.test.num_workers=8 \
+        model.backbone.net.discretization_method=zoh
+else
+    # Single node training
+    python -m torch.distributed.run \
+        --nproc_per_node=$GPUS_PER_NODE \
+        --master_port=$MASTER_PORT \
+        det/tools/lazyconfig_train_net.py \
+        --config-file ${DET_CONFIG} \
+        train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
+        train.init_checkpoint="" \
+        dataloader.train.num_workers=16 \
+        dataloader.test.num_workers=8 \
+        model.backbone.net.discretization_method=zoh
+fi
