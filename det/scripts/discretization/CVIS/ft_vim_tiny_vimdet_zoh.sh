@@ -22,6 +22,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --np
     ./det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
+    dataloader.train.total_batch_size=32 \
     dataloader.train.num_workers=16 \
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=zoh \
