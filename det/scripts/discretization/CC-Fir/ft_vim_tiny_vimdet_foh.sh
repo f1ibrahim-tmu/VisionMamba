@@ -32,6 +32,7 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_foh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
+PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_foh/best_checkpoint.pth
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port $MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
@@ -40,4 +41,5 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     train.init_checkpoint="" \
     dataloader.train.num_workers=16 \
     dataloader.test.num_workers=8 \
-    model.backbone.net.discretization_method=foh
+    model.backbone.net.discretization_method=foh \
+    model.backbone.net.pretrained=${PRETRAIN_CKPT}
