@@ -50,6 +50,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     ${SEG_CONFIG} \
     --seed 0 \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
+             train_dataloader.batch_size=32 \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=highorder \

@@ -12,6 +12,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --np
     ${SEG_CONFIG} \
     --seed 0 --work-dir work_dirs/vimseg-t-foh--deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
+             train_dataloader.batch_size=32 \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=foh \
