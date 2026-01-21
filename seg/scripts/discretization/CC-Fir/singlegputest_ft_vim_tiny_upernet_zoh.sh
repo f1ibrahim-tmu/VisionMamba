@@ -49,7 +49,7 @@ CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 --mast
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
-    --options model.backbone.pretrained=None \
+    --options model.backbone.pretrained="${PRETRAIN_CKPT}" \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \
