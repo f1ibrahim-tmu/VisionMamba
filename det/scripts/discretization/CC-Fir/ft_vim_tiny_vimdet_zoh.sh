@@ -52,6 +52,7 @@ echo "Node rank: $NODE_RANK, Master address: $MASTER_ADDR"
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
+PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
 
 # Set CUDA_VISIBLE_DEVICES to use all GPUs assigned by SLURM
 # SLURM automatically sets CUDA_VISIBLE_DEVICES, but we ensure it's set correctly
@@ -75,7 +76,8 @@ if [ "$NUM_NODES" -gt 1 ]; then
         train.init_checkpoint="" \
         dataloader.train.num_workers=16 \
         dataloader.test.num_workers=8 \
-        model.backbone.net.discretization_method=zoh
+        model.backbone.net.discretization_method=zoh \
+        model.backbone.net.pretrained=${PRETRAIN_CKPT}
 else
     # Single node training
     python -m torch.distributed.run \
@@ -87,5 +89,6 @@ else
         train.init_checkpoint="" \
         dataloader.train.num_workers=16 \
         dataloader.test.num_workers=8 \
-        model.backbone.net.discretization_method=zoh
+        model.backbone.net.discretization_method=zoh \
+        model.backbone.net.pretrained=${PRETRAIN_CKPT}
 fi
