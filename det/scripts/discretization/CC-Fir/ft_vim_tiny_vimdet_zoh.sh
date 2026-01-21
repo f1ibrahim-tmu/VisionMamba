@@ -74,6 +74,7 @@ if [ "$NUM_NODES" -gt 1 ]; then
         --config-file ${DET_CONFIG} \
         train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
         train.init_checkpoint="" \
+        dataloader.train.total_batch_size=32 \
         dataloader.train.num_workers=16 \
         dataloader.test.num_workers=8 \
         model.backbone.net.discretization_method=zoh \
@@ -87,6 +88,7 @@ else
         --config-file ${DET_CONFIG} \
         train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
         train.init_checkpoint="" \
+        dataloader.train.total_batch_size=32 \
         dataloader.train.num_workers=16 \
         dataloader.test.num_workers=8 \
         model.backbone.net.discretization_method=zoh \
