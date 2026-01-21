@@ -39,6 +39,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     --config-file ${DET_CONFIG} \
     train.output_dir=output/detection_logs/vim_tiny_vimdet_poly \
     train.init_checkpoint="" \
+    dataloader.train.total_batch_size=32 \
     dataloader.train.num_workers=16 \
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=poly \
