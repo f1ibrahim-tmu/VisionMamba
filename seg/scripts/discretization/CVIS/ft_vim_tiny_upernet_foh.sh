@@ -3,6 +3,34 @@
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_foh.py
 PRETRAIN_CKPT=/data/fady/projects/VisionMamba/output/vim_tiny_foh/best_checkpoint.pth
+WORK_DIR=output/segmentation_logs/vim_tiny_vimseg_upernet_foh
+
+# Check if we should resume training
+# MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
+RESUME_ARG=""
+CHECKPOINT_PATH=""
+
+# Check for latest.pth first (MMEngine default)
+if [ -f "${WORK_DIR}/latest.pth" ]; then
+    CHECKPOINT_PATH="${WORK_DIR}/latest.pth"
+elif [ -f "${WORK_DIR}/checkpoint.pth" ]; then
+    CHECKPOINT_PATH="${WORK_DIR}/checkpoint.pth"
+else
+    # Find the most recent .pth file in work_dir
+    if [ -d "${WORK_DIR}" ]; then
+        LATEST_CKPT=$(find "${WORK_DIR}" -maxdepth 1 -name "*.pth" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+        if [ -n "${LATEST_CKPT}" ] && [ -f "${LATEST_CKPT}" ]; then
+            CHECKPOINT_PATH="${LATEST_CKPT}"
+        fi
+    fi
+fi
+
+if [ -n "${CHECKPOINT_PATH}" ] && [ -f "${CHECKPOINT_PATH}" ]; then
+    RESUME_ARG="--resume-from ${CHECKPOINT_PATH}"
+    echo "Found checkpoint at ${CHECKPOINT_PATH}, will resume training from it."
+else
+    echo "No checkpoint found in ${WORK_DIR}, starting training from scratch."
+fi
 
 OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --standalone --nproc_per_node=2 \
     --master_port=0 \
@@ -16,5 +44,6 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
              model.backbone.discretization_method=foh \
              optimizer.lr=0.001 \
              optimizer.weight_decay=0.05 \
-    --work-dir output/segmentation_logs/vim_tiny_vimseg_upernet_foh
+    --work-dir ${WORK_DIR} \
+    ${RESUME_ARG}
 
