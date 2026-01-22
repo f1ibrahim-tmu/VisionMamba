@@ -25,9 +25,7 @@
 # RK4 is memory-intensive, so we use fewer CPU threads
 
 # Single-GPU training (default - avoids SIGBUS issues with distributed training)
-OMP_NUM_THREADS=2 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
-    --rdzv-backend=c10d \
-    --rdzv-endpoint=localhost:0 \
+OMP_NUM_THREADS=2 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 \
     --master_port=0 \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_rk4 \
