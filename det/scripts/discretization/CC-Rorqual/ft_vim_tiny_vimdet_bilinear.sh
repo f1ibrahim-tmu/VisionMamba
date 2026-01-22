@@ -33,11 +33,26 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_bilinear
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_bilinear/best_checkpoint.pth
+OUTPUT_DIR=output/detection_logs/vim_tiny_vimdet_bilinear
+
+# Check if we should resume training
+# The checkpointer looks for a 'last_checkpoint' file in the output directory
+RESUME_FLAG=""
+LAST_CHECKPOINT_FILE="${OUTPUT_DIR}/last_checkpoint"
+if [ -f "${LAST_CHECKPOINT_FILE}" ]; then
+    RESUME_FLAG="--resume"
+    echo "Found last_checkpoint file at ${LAST_CHECKPOINT_FILE}, will resume training."
+    echo "Checkpoint path: $(cat ${LAST_CHECKPOINT_FILE})"
+else
+    echo "No checkpoint found, starting training from scratch."
+    echo "Note: train.init_checkpoint is set to empty string, so pretrained backbone weights will be loaded from ${PRETRAIN_CKPT}"
+fi
 
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --standalone --nproc_per_node=2 --master_port $MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
-    train.output_dir=output/detection_logs/vim_tiny_vimdet_bilinear \
+    ${RESUME_FLAG} \
+    train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
     dataloader.train.total_batch_size=32 \
     dataloader.train.num_workers=16 \
