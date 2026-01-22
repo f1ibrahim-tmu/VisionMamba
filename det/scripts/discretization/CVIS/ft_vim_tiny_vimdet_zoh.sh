@@ -15,9 +15,7 @@ else
     echo "No checkpoint found at ${CHECKPOINT_PATH}, starting training from scratch."
 fi
 
-OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
-    --rdzv-backend=c10d \
-    --rdzv-endpoint=localhost:0 \
+OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --standalone --nproc_per_node=2 \
     --master_port=0 \
     ./det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \

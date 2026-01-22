@@ -25,7 +25,19 @@ export LD_PRELOAD=""
 # RK4 is memory-intensive, so we use fewer CPU threads
 
 # Single-GPU training (default - avoids SIGBUS issues with distributed training)
+<<<<<<< HEAD
 OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 python ./vim/main.py \
+||||||| parent of b5ce7a8 (Add --standalone flag to all CVIS scripts for reliable single-node multi-GPU training)
+OMP_NUM_THREADS=2 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 \
+    --rdzv-backend=c10d \
+    --rdzv-endpoint=localhost:0 \
+    --master_port=0 \
+    ./vim/main.py \
+=======
+OMP_NUM_THREADS=2 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 \
+    --master_port=0 \
+    ./vim/main.py \
+>>>>>>> b5ce7a8 (Add --standalone flag to all CVIS scripts for reliable single-node multi-GPU training)
     --model vim_tiny_patch16_224_bimambav2_rk4 \
     --batch-size 256 \
     --drop-path 0.0 \
