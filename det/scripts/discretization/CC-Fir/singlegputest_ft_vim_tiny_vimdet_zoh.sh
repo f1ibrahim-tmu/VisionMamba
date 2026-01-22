@@ -33,7 +33,7 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --nproc_per_node=1 --master_port $MASTER_PORT \
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_node=1 --master_port $MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
