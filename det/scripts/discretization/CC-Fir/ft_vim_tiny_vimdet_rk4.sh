@@ -34,7 +34,7 @@ DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_rk4
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_rk4/best_checkpoint.pth
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port $MASTER_PORT \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     train.output_dir=output/detection_logs/vim_tiny_vimdet_rk4 \
@@ -44,4 +44,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=rk4 \
     model.backbone.net.pretrained=${PRETRAIN_CKPT}
-    # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \

@@ -15,7 +15,7 @@ export MASTER_PORT
 
 echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --master_port $MASTER_PORT \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_bilinear \
     --batch-size 256 \
