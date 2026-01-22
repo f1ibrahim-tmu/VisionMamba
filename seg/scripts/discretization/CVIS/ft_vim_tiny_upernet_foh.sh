@@ -4,9 +4,7 @@
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_foh.py
 PRETRAIN_CKPT=/data/fady/projects/VisionMamba/output/vim_tiny_foh/best_checkpoint.pth
 
-OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 \
-    --rdzv-backend=c10d \
-    --rdzv-endpoint=localhost:0 \
+OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --standalone --nproc_per_node=2 \
     --master_port=0 \
     ./seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
