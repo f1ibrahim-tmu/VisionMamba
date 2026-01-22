@@ -21,14 +21,32 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
 
-# Conditionally set resume checkpoint if it exists
-CHECKPOINT_PATH=./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh/checkpoint.pth
+# Check if we should resume training
+# MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
+WORK_DIR=./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh
 RESUME_ARG=""
-if [ -f "${CHECKPOINT_PATH}" ]; then
+CHECKPOINT_PATH=""
+
+# Check for latest.pth first (MMEngine default)
+if [ -f "${WORK_DIR}/latest.pth" ]; then
+    CHECKPOINT_PATH="${WORK_DIR}/latest.pth"
+elif [ -f "${WORK_DIR}/checkpoint.pth" ]; then
+    CHECKPOINT_PATH="${WORK_DIR}/checkpoint.pth"
+else
+    # Find the most recent .pth file in work_dir
+    if [ -d "${WORK_DIR}" ]; then
+        LATEST_CKPT=$(find "${WORK_DIR}" -maxdepth 1 -name "*.pth" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+        if [ -n "${LATEST_CKPT}" ] && [ -f "${LATEST_CKPT}" ]; then
+            CHECKPOINT_PATH="${LATEST_CKPT}"
+        fi
+    fi
+fi
+
+if [ -n "${CHECKPOINT_PATH}" ] && [ -f "${CHECKPOINT_PATH}" ]; then
     RESUME_ARG="--resume-from ${CHECKPOINT_PATH}"
     echo "Found checkpoint at ${CHECKPOINT_PATH}, will resume training from it."
 else
-    echo "No checkpoint found at ${CHECKPOINT_PATH}, starting training from scratch."
+    echo "No checkpoint found in ${WORK_DIR}, starting training from scratch."
 fi
 
 # Generate unique port based on SLURM job ID (if available) or use process ID
@@ -57,7 +75,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --standalone --nproc_pe
     seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
     --seed 0 \
-    --work-dir ./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
+    --work-dir ${WORK_DIR} \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              train_dataloader.batch_size=32 \
              model.backbone.if_bimamba=False \
