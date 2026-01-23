@@ -62,8 +62,8 @@ fi
 # export MASTER_PORT
 # echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-python -m torch.distributed.run --standalone --nproc_per_node=4 \
-    seg/train.py --launcher slurm \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port=0 \
+    seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
     --work-dir ${WORK_DIR} \
