@@ -19,17 +19,6 @@ fi
 
 export DETECTRON2_DATASETS
 
-# # Generate unique port based on SLURM job ID (if available) or use process ID
-# # Port range: 29500-29999 (500 ports available)
-# if [ -n "$SLURM_JOB_ID" ]; then
-#     MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
-# else
-#     # Fallback: use process ID if not in SLURM environment
-#     MASTER_PORT=$((29500 + $$ % 500))
-# fi
-# export MASTER_PORT
-# echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
-
 # 2. Training Variables
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
@@ -53,8 +42,19 @@ else
     echo "Note: train.init_checkpoint is set to empty string, so pretrained backbone weights will be loaded from ${PRETRAIN_CKPT}"
 fi
 
+# Generate unique port based on SLURM job ID (if available) or use process ID
+# Port range: 29500-29999 (500 ports available)
+if [ -n "$SLURM_JOB_ID" ]; then
+    MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
+else
+    # Fallback: use process ID if not in SLURM environment
+    MASTER_PORT=$((29500 + $$ % 500))
+fi
+export MASTER_PORT
+echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
+
 # 4. Training Command
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port=0 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port=$MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     ${RESUME_FLAG} \
