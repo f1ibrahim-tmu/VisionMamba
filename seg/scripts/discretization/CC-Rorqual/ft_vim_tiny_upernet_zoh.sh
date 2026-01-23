@@ -5,6 +5,7 @@
 #   DATASET_PATH: Path to ade20k directory (e.g., /path/to/ade20k)
 #                 If not provided, defaults to /home/f7ibrahi/scratch/dataset/ade20k/ADEChallengeData2016
 
+# 1. Dataset Path Logic
 # Get dataset path from command line argument or use default
 # Expected structure: ${DATASET_PATH}/ADEChallengeData2016/
 if [ -z "$1" ]; then
@@ -15,13 +16,14 @@ else
     echo "Using dataset path: ${ADE20K_DATASET_PATH}"
 fi
 
+# 2. Training Variables
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
 
-# Check if we should resume training
+# 3. Resume Logic
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
 WORK_DIR=./output/segmentation_logs/vim_tiny_vimseg_upernet_zoh
 RESUME_ARG=""
@@ -49,19 +51,18 @@ else
     echo "No checkpoint found in ${WORK_DIR}, starting training from scratch."
 fi
 
-# Generate unique port based on SLURM job ID (if available) or use process ID
-# Port range: 29500-29999 (500 ports available)
-if [ -n "$SLURM_JOB_ID" ]; then
-    MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
-else
-    # Fallback: use process ID if not in SLURM environment
-    MASTER_PORT=$((29500 + $$ % 500))
-fi
-export MASTER_PORT
+# # Generate unique port based on SLURM job ID (if available) or use process ID
+# # Port range: 29500-29999 (500 ports available)
+# if [ -n "$SLURM_JOB_ID" ]; then
+#     MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
+# else
+#     # Fallback: use process ID if not in SLURM environment
+#     MASTER_PORT=$((29500 + $$ % 500))
+# fi
+# export MASTER_PORT
+# echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
-
-python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
+python -m torch.distributed.run --standalone --nproc_per_node=4 \
     seg/train.py --launcher slurm \
     ${SEG_CONFIG} \
     --seed 0 \
