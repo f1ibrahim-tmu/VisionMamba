@@ -56,6 +56,7 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 # 4. Training Command
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port=$MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
+    --num-gpus 4 \
     --config-file ${DET_CONFIG} \
     ${RESUME_FLAG} \
     train.output_dir=${OUTPUT_DIR} \

@@ -156,11 +156,22 @@ def main(args):
 
 if __name__ == "__main__":
     args = default_argument_parser().parse_args()
-    launch(
-        main,
-        args.num_gpus,
-        num_machines=args.num_machines,
-        machine_rank=args.machine_rank,
-        dist_url=args.dist_url,
-        args=(args,),
-    )
+    
+    # Check if already in distributed environment (from torch.distributed.run)
+    # When torch.distributed.run spawns processes, it sets RANK and WORLD_SIZE
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        # Already launched by torch.distributed.run, skip launch() to avoid double spawning
+        # Just call main directly - distributed setup is already done
+        logger.info("Detected existing distributed environment (RANK=%s, WORLD_SIZE=%s), "
+                   "skipping Detectron2 launch()", os.environ.get("RANK"), os.environ.get("WORLD_SIZE"))
+        main(args)
+    else:
+        # Not in distributed environment, use Detectron2's launch to spawn processes
+        launch(
+            main,
+            args.num_gpus,
+            num_machines=args.num_machines,
+            machine_rank=args.machine_rank,
+            dist_url=args.dist_url,
+            args=(args,),
+        )
