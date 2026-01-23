@@ -48,7 +48,7 @@ else
     echo "Note: train.init_checkpoint is set to empty string, so pretrained backbone weights will be loaded from ${PRETRAIN_CKPT}"
 fi
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
+python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
     ${RESUME_FLAG} \
