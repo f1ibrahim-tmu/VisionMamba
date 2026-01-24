@@ -45,6 +45,48 @@ import argparse
 logger = logging.getLogger("detectron2")
 
 
+def _apply_gradient_clipping(optimizer, clip_config):
+    """
+    Wrap optimizer's step method to apply gradient clipping.
+    
+    Args:
+        optimizer: torch.optim.Optimizer instance
+        clip_config: dict with keys:
+            - enabled: bool
+            - clip_type: "norm" or "value"
+            - clip_value: float (max norm or max value)
+            - norm_type: float (for norm clipping, default 2.0)
+    """
+    if not clip_config.get("enabled", False):
+        return optimizer
+    
+    clip_type = clip_config.get("clip_type", "norm")
+    clip_value = clip_config.get("clip_value", 1.0)
+    norm_type = clip_config.get("norm_type", 2.0)
+    
+    original_step = optimizer.step
+    
+    def step_with_clipping(closure=None):
+        if clip_type == "norm":
+            # Clip by norm
+            torch.nn.utils.clip_grad_norm_(
+                [p for group in optimizer.param_groups for p in group["params"]],
+                clip_value,
+                norm_type
+            )
+        elif clip_type == "value":
+            # Clip by value
+            torch.nn.utils.clip_grad_value_(
+                [p for group in optimizer.param_groups for p in group["params"]],
+                clip_value
+            )
+        return original_step(closure)
+    
+    optimizer.step = step_with_clipping
+    logger.info(f"Gradient clipping enabled: type={clip_type}, value={clip_value}")
+    return optimizer
+
+
 def do_test(cfg, model):
     if "evaluator" in cfg.dataloader:
         ret = inference_on_dataset(
@@ -80,6 +122,10 @@ def do_train(args, cfg):
 
     cfg.optimizer.params.model = model
     optim = instantiate(cfg.optimizer)
+    
+    # Apply gradient clipping if configured
+    if hasattr(cfg.train, "clip_grad") and cfg.train.clip_grad:
+        optim = _apply_gradient_clipping(optim, cfg.train.clip_grad)
 
     train_loader = instantiate(cfg.dataloader.train)
 

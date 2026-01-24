@@ -26,4 +26,12 @@ dataloader.train.total_batch_size = 32
 # Ensure AMP is enabled (should already be enabled in base config, but make sure)
 train.amp.enabled = True
 
+# Enable gradient clipping to prevent training divergence (NaN/Inf)
+train.clip_grad = dict(
+    enabled=True,
+    clip_type="norm",  # "norm" or "value"
+    clip_value=1.0,   # max gradient norm
+    norm_type=2.0     # L2 norm
+)
+
 optimizer.params.lr_factor_func = partial(get_vim_lr_decay_rate, num_layers=24, lr_decay_rate=0.837)
