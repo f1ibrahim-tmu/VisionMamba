@@ -60,10 +60,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     --num-gpus 4 \
     --config-file ${DET_CONFIG} \
     ${RESUME_FLAG} \
-    # --use-wandb \
-    # --wandb-project visionmamba \
-    # --wandb-run-name vim_tiny_vimdet_zoh_cc-fir \
-    # --wandb-tags detection zoh cc-fir \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
     dataloader.train.total_batch_size=16 \
@@ -71,3 +67,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     model.backbone.net.discretization_method=zoh \
     model.backbone.net.pretrained=${PRETRAIN_CKPT}
+    # --use-wandb \
+    # --wandb-project visionmamba \
+    # --wandb-run-name vim_tiny_vimdet_zoh_cc-fir \
+    # --wandb-tags detection zoh cc-fir \
