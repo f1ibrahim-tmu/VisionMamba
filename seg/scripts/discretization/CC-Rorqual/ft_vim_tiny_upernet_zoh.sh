@@ -66,6 +66,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
+    # --use-wandb \
+    # --wandb-project visionmamba \
+    # --wandb-run-name vim_tiny_upernet_zoh_cc-rorqual \
+    # --wandb-tags segmentation zoh cc-rorqual \
     --work-dir ${WORK_DIR} \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              train_dataloader.batch_size=64 \

@@ -60,9 +60,13 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     --num-gpus 4 \
     --config-file ${DET_CONFIG} \
     ${RESUME_FLAG} \
+    # --use-wandb \
+    # --wandb-project visionmamba \
+    # --wandb-run-name vim_tiny_vimdet_zoh_cc-rorqual \
+    # --wandb-tags detection zoh cc-rorqual \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
-    dataloader.train.total_batch_size=8 \
+    dataloader.train.total_batch_size=16 \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     model.backbone.net.discretization_method=zoh \

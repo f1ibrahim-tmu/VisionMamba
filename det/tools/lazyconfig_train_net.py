@@ -40,6 +40,7 @@ from detectron2.engine.defaults import create_ddp_model
 from detectron2.evaluation import inference_on_dataset, print_csv_format
 from detectron2.utils import comm
 import torch
+import argparse
 
 logger = logging.getLogger("detectron2")
 
@@ -89,22 +90,46 @@ def do_train(args, cfg):
         cfg.train.output_dir,
         trainer=trainer,
     )
-    trainer.register_hooks(
-        [
-            hooks.IterationTimer(),
-            hooks.LRScheduler(scheduler=instantiate(cfg.lr_multiplier)),
-            hooks.PeriodicCheckpointer(checkpointer, **cfg.train.checkpointer)
-            if comm.is_main_process()
-            else None,
-            hooks.EvalHook(cfg.train.eval_period, lambda: do_test(cfg, model)),
-            hooks.PeriodicWriter(
-                default_writers(cfg.train.output_dir, cfg.train.max_iter),
-                period=cfg.train.log_period,
+    
+    # Register WandB hook if enabled
+    hook_list = [
+        hooks.IterationTimer(),
+        hooks.LRScheduler(scheduler=instantiate(cfg.lr_multiplier)),
+        hooks.PeriodicCheckpointer(checkpointer, **cfg.train.checkpointer)
+        if comm.is_main_process()
+        else None,
+        hooks.EvalHook(cfg.train.eval_period, lambda: do_test(cfg, model)),
+        hooks.PeriodicWriter(
+            default_writers(cfg.train.output_dir, cfg.train.max_iter),
+            period=cfg.train.log_period,
+        )
+        if comm.is_main_process()
+        else None,
+    ]
+    
+    # Add WandB hook if enabled
+    if args and getattr(args, 'use_wandb', False):
+        try:
+            from detectron2.engine.hooks import WandbHook
+            wandb_hook = WandbHook(
+                project=getattr(args, 'wandb_project', 'detectron2'),
+                entity=getattr(args, 'wandb_entity', None),
+                name=getattr(args, 'wandb_run_name', None),
+                tags=getattr(args, 'wandb_tags', []),
+                enabled=True
             )
-            if comm.is_main_process()
-            else None,
-        ]
-    )
+            # Attach trainer to hook (needed for hook callbacks)
+            wandb_hook.trainer = trainer
+            hook_list.append(wandb_hook if comm.is_main_process() else None)
+            logger.info("WandB hook registered: project=%s, name=%s", 
+                       getattr(args, 'wandb_project', 'detectron2'),
+                       getattr(args, 'wandb_run_name', None))
+        except ImportError:
+            logger.warning("WandB not available. Install with: pip install wandb")
+        except Exception as e:
+            logger.warning(f"Failed to register WandB hook: {e}")
+    
+    trainer.register_hooks(hook_list)
 
     checkpointer.resume_or_load(cfg.train.init_checkpoint, resume=args.resume)
     if args.resume and checkpointer.has_checkpoint():
@@ -156,7 +181,14 @@ def main(args):
 
 
 if __name__ == "__main__":
-    args = default_argument_parser().parse_args()
+    parser = default_argument_parser()
+    # Add WandB arguments
+    parser.add_argument('--use-wandb', action='store_true', help='Use Weights & Biases for logging')
+    parser.add_argument('--wandb-project', default='visionmamba', type=str, help='W&B project name')
+    parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
+    parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name')
+    parser.add_argument('--wandb-tags', nargs='+', default=[], help='Tags for W&B run')
+    args = parser.parse_args()
     
     # Check if already in distributed environment (from torch.distributed.run)
     # When torch.distributed.run spawns processes, it sets RANK and WORLD_SIZE
