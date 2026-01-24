@@ -228,12 +228,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = default_argument_parser()
-    # Add WandB arguments
-    parser.add_argument('--use-wandb', action='store_true', help='Use Weights & Biases for logging')
-    parser.add_argument('--wandb-project', default='visionmamba', type=str, help='W&B project name')
-    parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
-    parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name')
-    parser.add_argument('--wandb-tags', nargs='+', default=[], help='Tags for W&B run')
+    # Note: WandB arguments are already defined in default_argument_parser()
+    # (--use-wandb, --wandb-project, --wandb-entity, --wandb-run-name, --wandb-tags)
     args = parser.parse_args()
     
     # Check if already in distributed environment (from torch.distributed.run)
