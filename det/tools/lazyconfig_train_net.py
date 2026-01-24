@@ -39,6 +39,7 @@ from detectron2.engine import (
 from detectron2.engine.defaults import create_ddp_model
 from detectron2.evaluation import inference_on_dataset, print_csv_format
 from detectron2.utils import comm
+import torch
 
 logger = logging.getLogger("detectron2")
 
@@ -161,9 +162,22 @@ if __name__ == "__main__":
     # When torch.distributed.run spawns processes, it sets RANK and WORLD_SIZE
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         # Already launched by torch.distributed.run, skip launch() to avoid double spawning
-        # Just call main directly - distributed setup is already done
-        logger.info("Detected existing distributed environment (RANK=%s, WORLD_SIZE=%s), "
-                   "skipping Detectron2 launch()", os.environ.get("RANK"), os.environ.get("WORLD_SIZE"))
+        # Need to set CUDA device and create local process group
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        
+        # Set CUDA device for this process
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            logger.info("Set CUDA device to local_rank=%d", local_rank)
+        
+        # Create local process group (needed for Detectron2)
+        # For single node, num_gpus_per_machine equals world_size
+        num_gpus_per_machine = world_size
+        comm.create_local_process_group(num_gpus_per_machine)
+        
+        logger.info("Detected existing distributed environment (RANK=%s, WORLD_SIZE=%s, LOCAL_RANK=%s), "
+                   "skipping Detectron2 launch()", os.environ.get("RANK"), world_size, local_rank)
         main(args)
     else:
         # Not in distributed environment, use Detectron2's launch to spawn processes
