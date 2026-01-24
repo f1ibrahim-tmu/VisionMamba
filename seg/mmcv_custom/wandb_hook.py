@@ -22,7 +22,7 @@ class WandbHook(Hook):
 
     def __init__(
         self,
-        project: Optional[str] = "mmsegmentation",
+        project: Optional[str] = "visionmamba",
         entity: Optional[str] = None,
         name: Optional[str] = None,
         tags: Optional[list] = None,

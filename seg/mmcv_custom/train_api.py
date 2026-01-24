@@ -93,7 +93,7 @@ def train_segmentor(cfg, distributed=False, validate=False, timestamp=None, meta
     if hasattr(cfg, 'use_wandb') and cfg.use_wandb:
         from .wandb_hook import WandbHook
         wandb_hook = WandbHook(
-            project=getattr(cfg, 'wandb_project', 'mmsegmentation'),
+            project=getattr(cfg, 'wandb_project', 'visionmamba'),
             entity=getattr(cfg, 'wandb_entity', None),
             name=getattr(cfg, 'wandb_run_name', None),
             tags=getattr(cfg, 'wandb_tags', []),
