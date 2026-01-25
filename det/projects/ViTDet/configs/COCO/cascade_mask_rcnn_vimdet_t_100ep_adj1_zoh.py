@@ -31,28 +31,29 @@ dataloader.train.total_batch_size = 32
 train.amp.enabled = True
 
 # Enable gradient clipping to prevent training divergence (NaN/Inf)
-# More aggressive clipping for Vision Mamba stability
+# Very aggressive clipping for ZOH discretization stability
 train.clip_grad = dict(
     enabled=True,
     clip_type="norm",  # "norm" or "value"
-    clip_value=0.5,   # Reduced from 1.0 to 0.5 for more aggressive clipping
+    clip_value=0.1,   # Very aggressive: reduced from 0.5 to 0.1 for ZOH stability
     norm_type=2.0     # L2 norm
 )
 
 # Reduce learning rate significantly to prevent divergence
-# Default is 1e-4, reducing to 2.5e-5 (4x reduction) for stability
-optimizer.lr = 2.5e-5
+# Default is 1e-4, reducing to 1e-5 (10x reduction) for ZOH stability
+# ZOH is more numerically unstable than other discretization methods
+optimizer.lr = 1e-5
 
-# Increase warmup period significantly (from 250 to 2000 iterations)
-# This allows the model to stabilize before full learning rate kicks in
+# Increase warmup period significantly (from 250 to 10000 iterations)
+# ZOH needs very long warmup to stabilize before full learning rate kicks in
 lr_multiplier = L(WarmupParamScheduler)(
     scheduler=L(MultiStepParamScheduler)(
         values=[1.0, 0.1, 0.01],
         milestones=[163889, 177546],
         num_updates=train.max_iter,
     ),
-    warmup_length=2000 / train.max_iter,  # Increased from 250 to 2000 iterations
-    warmup_factor=0.0001,  # Reduced from 0.001 to start even lower (LR starts at 2.5e-9)
+    warmup_length=10000 / train.max_iter,  # Increased from 2000 to 10000 iterations for ZOH
+    warmup_factor=0.00001,  # Very small: reduced from 0.0001 to 0.00001 (LR starts at 1e-10)
 )
 
 optimizer.params.lr_factor_func = partial(get_vim_lr_decay_rate, num_layers=24, lr_decay_rate=0.837)
