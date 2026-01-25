@@ -15,6 +15,7 @@ in the config file and implement a new train_net.py to handle them.
 import logging
 import os
 import sys
+import types
 
 # Ensure we import from local det/detectron2 directory
 # Get the directory containing this script (det/tools/)
@@ -66,23 +67,25 @@ def _apply_gradient_clipping(optimizer, clip_config):
     
     original_step = optimizer.step
     
-    def step_with_clipping(closure=None):
+    def step_with_clipping(self, closure=None):
         if clip_type == "norm":
             # Clip by norm
             torch.nn.utils.clip_grad_norm_(
-                [p for group in optimizer.param_groups for p in group["params"]],
+                [p for group in self.param_groups for p in group["params"]],
                 clip_value,
                 norm_type
             )
         elif clip_type == "value":
             # Clip by value
             torch.nn.utils.clip_grad_value_(
-                [p for group in optimizer.param_groups for p in group["params"]],
+                [p for group in self.param_groups for p in group["params"]],
                 clip_value
             )
         return original_step(closure)
     
-    optimizer.step = step_with_clipping
+    # Bind the function as a method to preserve __self__ attribute
+    # This is required for PyTorch's LR scheduler which accesses method.__self__
+    optimizer.step = types.MethodType(step_with_clipping, optimizer)
     logger.info(f"Gradient clipping enabled: type={clip_type}, value={clip_value}")
     return optimizer
 
