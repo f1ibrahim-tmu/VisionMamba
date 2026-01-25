@@ -237,7 +237,12 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     # Discretization methods
     if discretization_method == "zoh":
         # Zero Order Hold (original implementation)
+        # Clamp delta to prevent numerical explosion in exp(delta * A)
+        # This is critical for detection tasks where pretrained weights may have large dt_proj values
+        delta = torch.clamp(delta, max=5.0)  # Prevent explosion: exp(5 * A) is still manageable
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        # Clamp deltaA result to prevent Inf values that cause training divergence
+        deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)  # Prevent Inf/NaN in downstream computations
         if not is_variable_B:
             deltaB_u = torch.einsum('bdl,dn,bdl->bdln', delta, B, u)
         else:

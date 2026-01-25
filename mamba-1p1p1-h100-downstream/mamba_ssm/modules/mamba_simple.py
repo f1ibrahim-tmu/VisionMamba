@@ -363,7 +363,12 @@ class Mamba(nn.Module):
             # Apply discretization based on the selected method
             if self.discretization_method == "zoh":
                 # Zero Order Hold (default)
+                # Clamp dt to prevent numerical explosion in exp(dt * A)
+                # This is critical for detection tasks where pretrained weights may have large dt_proj values
+                dt = torch.clamp(dt, max=5.0)  # Prevent explosion: exp(5 * A) is still manageable
                 dA = torch.exp(torch.einsum('bd,dn->bdn', dt, A))
+                # Clamp dA result to prevent Inf values that cause training divergence
+                dA = torch.clamp(dA, min=1e-10, max=1e10)  # Prevent Inf/NaN in downstream computations
                 dB = torch.einsum('bd,bn->bdn', dt, B)
             elif self.discretization_method == "foh":
                 # First Order Hold
