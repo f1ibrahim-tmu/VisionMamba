@@ -25,7 +25,7 @@ PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/o
 
 # 3. Resume Logic
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
-WORK_DIR=output/segmentation_logs/vim_tiny_vimseg_upernet_zoh
+WORK_DIR=output/segmentation_logs/vim_tiny_fir_vimseg_upernet_zoh
 RESUME_ARG=""
 CHECKPOINT_PATH=""
 

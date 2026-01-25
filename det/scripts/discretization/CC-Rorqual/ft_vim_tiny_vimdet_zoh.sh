@@ -23,7 +23,7 @@ export DETECTRON2_DATASETS
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
-OUTPUT_DIR=output/detection_logs/vim_tiny_vimdet_zoh
+OUTPUT_DIR=output/detection_logs/vim_tiny_rorqual_vimdet_zoh
 # Calculate workers per GPU based on the total cores allocated by SLURM
 # Fir: 48 cores / 4 GPUs = 12 workers per task
 # Rorqual: 64 cores / 4 GPUs = 16 workers per task
@@ -62,7 +62,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     ${RESUME_FLAG} \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
-    dataloader.train.total_batch_size=16 \
+    dataloader.train.total_batch_size=32 \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     model.backbone.net.discretization_method=zoh \
