@@ -20,12 +20,12 @@ fi
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
+SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
 
 # 3. Resume Logic
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
-WORK_DIR=output/segmentation_logs/vim_tiny_fir_vimseg_upernet_zoh
+WORK_DIR=./output/segmentation_logs/vim_tiny_fir_vimseg_upernet_zoh
 RESUME_ARG=""
 CHECKPOINT_PATH=""
 
@@ -66,7 +66,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
-    --options model.backbone.pretrained="${PRETRAIN_CKPT}" \
+    --work-dir ${WORK_DIR} \
+    --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              train_dataloader.batch_size=48 \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
@@ -76,7 +77,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
              train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
-    --work-dir ${WORK_DIR} \
     ${RESUME_ARG}
     # --use-wandb \
     # --wandb-project visionmamba \
