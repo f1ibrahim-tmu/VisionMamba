@@ -86,10 +86,10 @@ param_scheduler = [
 # MMEngine format: explicit dataloader configs (overrides base config)
 train_dataloader = dict(
     batch_size=8,
-    num_workers=16,
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(type='InfiniteSampler', shuffle=True)
 )
 
 # Backward compatibility: keep old format
-data=dict(samples_per_gpu=8, workers_per_gpu=16)
+data=dict(samples_per_gpu=8, workers_per_gpu=4)
