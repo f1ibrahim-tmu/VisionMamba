@@ -18,7 +18,7 @@ fi
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
+SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
 
 # Check if we should resume training

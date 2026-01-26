@@ -1,9 +1,9 @@
 # --------------------------------------------------------
-# Vision Mamba Segmentation with Higher-Order Hold Discretization
+# Vision Mamba Segmentation with Polynomial Interpolation Discretization
 # --------------------------------------------------------'
 _base_ = [
     '../../_base_/models/upernet_vim.py', '../../_base_/datasets/ade20k.py',
-    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_60k.py'
+    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_200k.py'
 ]
 crop_size = (512, 512)
 
@@ -27,7 +27,7 @@ model = dict(
         final_pool_type='all',
         if_divide_out=True,
         if_cls_token=False,
-        discretization_method='highorder',  # Higher-Order Hold discretization
+        discretization_method='poly',  # Polynomial Interpolation discretization
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],
@@ -68,7 +68,7 @@ param_scheduler = [
         eta_min=0.0,
         power=1.0,
         begin=1500,
-        end=60000,
+        end=200000,
         by_epoch=False
     )
 ]

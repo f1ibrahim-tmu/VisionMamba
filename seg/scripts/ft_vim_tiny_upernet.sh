@@ -3,7 +3,7 @@
 source /mnt/bn/lianghuidata/miniconda/bin/activate /mnt/bn/lianghuidata/miniconda/envs/vim-seg
 cd /mnt/bn/lianghuidata/Vim/seg
 
-SEG_CONFIG=configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py
+SEG_CONFIG=configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k.py
 PRETRAIN_CKPT=/mnt/bn/lianghuidata/Vim/pretrained_ckpts/pretrained-vim-t.pth
 
 python3 -m torch.distributed.launch --nproc_per_node=4 --nnodes=${WORLD_SIZE} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=10295 \

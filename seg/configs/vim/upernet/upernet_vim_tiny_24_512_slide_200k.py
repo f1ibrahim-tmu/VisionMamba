@@ -12,7 +12,7 @@
 # --------------------------------------------------------'
 _base_ = [
     '../../_base_/models/upernet_vim.py', '../../_base_/datasets/ade20k.py',
-    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_60k.py'
+    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_200k.py'
 ]
 crop_size = (512, 512)
 
@@ -77,7 +77,7 @@ param_scheduler = [
         eta_min=0.0,
         power=1.0,
         begin=1500,
-        end=60000,
+        end=200000,
         by_epoch=False
     )
 ]

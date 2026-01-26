@@ -8,12 +8,12 @@ param_scheduler = [
         eta_min=1e-4,
         power=0.9,
         begin=0,
-        end=60000,
+        end=200000,
         by_epoch=False
     )
 ]
 # runtime settings
-train_cfg = dict(type='IterBasedTrainLoop', max_iters=60000, val_interval=1000)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=200000, val_interval=1000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 default_hooks = dict(

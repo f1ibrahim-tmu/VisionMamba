@@ -1,7 +1,7 @@
 #!/bin/bash
 # First Order Hold (FOH) discretization for Vision Mamba segmentation on ADE20K
 
-SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_foh.py
+SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_foh.py
 PRETRAIN_CKPT=/data/fady/projects/VisionMamba/output/vim_tiny_foh/best_checkpoint.pth
 WORK_DIR=output/segmentation_logs/vim_tiny_vimseg_upernet_foh
 

@@ -1,10 +1,9 @@
 # --------------------------------------------------------
-# Vision Mamba Segmentation with Zero Order Hold (ZOH) Discretization
-# Based on the original Vision Mamba implementation
+# Vision Mamba Segmentation with Runge-Kutta 4th Order (RK4) Discretization
 # --------------------------------------------------------'
 _base_ = [
     '../../_base_/models/upernet_vim.py', '../../_base_/datasets/ade20k.py',
-    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_60k.py'
+    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_200k.py'
 ]
 crop_size = (512, 512)
 
@@ -28,7 +27,7 @@ model = dict(
         final_pool_type='all',
         if_divide_out=True,
         if_cls_token=False,
-        discretization_method='zoh',  # Zero Order Hold discretization
+        discretization_method='rk4',  # Runge-Kutta 4th Order discretization
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],
@@ -69,21 +68,12 @@ param_scheduler = [
         eta_min=0.0,
         power=1.0,
         begin=1500,
-        end=60000,
+        end=200000,
         by_epoch=False
     )
 ]
 
 # By default, models are trained on 4 GPUs with 8 images per GPU
-# MMEngine format: explicit dataloader configs (overrides base config)
-train_dataloader = dict(
-    batch_size=8,
-    num_workers=4,
-    persistent_workers=True,
-    sampler=dict(type='InfiniteSampler', shuffle=True)
-)
-
-# Backward compatibility: keep old format
 # MMEngine format: explicit dataloader configs (overrides base config)
 train_dataloader = dict(
     batch_size=8,

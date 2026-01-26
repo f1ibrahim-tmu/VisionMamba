@@ -98,7 +98,7 @@ default_hooks = dict(
 
 ```bash
 cd seg
-python train.py configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py \
+python train.py configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k.py \
     --work-dir work_dirs/vim_tiny
 ```
 
@@ -107,7 +107,7 @@ python train.py configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py \
 ```bash
 cd seg
 torchrun --nproc_per_node=4 train.py \
-    configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py \
+    configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k.py \
     --work-dir work_dirs/vim_tiny \
     --launcher pytorch
 ```
@@ -124,7 +124,7 @@ bash scripts/ft_vim_tiny_upernet.sh
 
 ```bash
 cd seg
-python test.py configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py \
+python test.py configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k.py \
     checkpoint.pth --eval mIoU
 ```
 
@@ -133,7 +133,7 @@ python test.py configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py \
 ```bash
 cd seg
 torchrun --nproc_per_node=4 test.py \
-    configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k.py \
+    configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k.py \
     checkpoint.pth --eval mIoU \
     --launcher pytorch
 ```
