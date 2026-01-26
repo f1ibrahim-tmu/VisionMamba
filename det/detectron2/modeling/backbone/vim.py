@@ -131,6 +131,26 @@ class VisionMambaDet(VisionMamba, Backbone):
             res = self.load_state_dict(state_dict_model, strict=False) 
             logger.info(res)
             print(res)
+            
+            # Reinitialize dt_proj for detection task compatibility
+            # Classification models have large dt_proj values optimized for short sequences (224x224)
+            # Detection needs smaller dt_proj for longer sequences (1024x1024) to prevent numerical instability
+            logger.info("Reinitializing dt_proj for detection task compatibility...")
+            dt_proj_reinit_count = 0
+            for layer in self.layers:
+                if hasattr(layer, 'mixer') and hasattr(layer.mixer, 'dt_proj'):
+                    # Reinitialize dt_proj.weight with small values
+                    nn.init.normal_(layer.mixer.dt_proj.weight, mean=0.0, std=0.01)
+                    # Reinitialize dt_proj.bias to negative value for smaller dt after softplus
+                    # Negative bias ensures softplus(dt + bias) produces small values (typically 0.1-2.0)
+                    nn.init.constant_(layer.mixer.dt_proj.bias, -1.0)
+                    dt_proj_reinit_count += 1
+                # Handle bidirectional mamba (v2) which has dt_proj_b
+                if hasattr(layer, 'mixer') and hasattr(layer.mixer, 'dt_proj_b'):
+                    nn.init.normal_(layer.mixer.dt_proj_b.weight, mean=0.0, std=0.01)
+                    nn.init.constant_(layer.mixer.dt_proj_b.bias, -1.0)
+                    dt_proj_reinit_count += 1
+            logger.info(f"Reinitialized {dt_proj_reinit_count} dt_proj layers for detection task")
         elif pretrained is None:
             self.apply(_init_weights)
         else:
