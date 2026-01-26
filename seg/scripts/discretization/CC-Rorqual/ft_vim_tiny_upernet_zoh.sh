@@ -81,4 +81,4 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     # --use-wandb \
     # --wandb-project visionmamba \
     # --wandb-run-name vim_tiny_upernet_zoh_cc-rorqual \
-    # --wandb-tags segmentation zoh cc-rorqual \
+    # --wandb-tags segmentation zoh cc-rorqual
