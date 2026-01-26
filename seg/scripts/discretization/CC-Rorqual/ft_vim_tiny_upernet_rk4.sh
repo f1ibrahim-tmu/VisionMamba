@@ -5,6 +5,7 @@
 #   DATASET_PATH: Path to ade20k directory (e.g., /path/to/ade20k)
 #                 If not provided, defaults to /home/f7ibrahi/scratch/dataset/ade20k/ADEChallengeData2016
 
+# 1. Dataset Path Logic
 # Get dataset path from command line argument or use default
 # Expected structure: ${DATASET_PATH}/ADEChallengeData2016/
 if [ -z "$1" ]; then
@@ -15,15 +16,16 @@ else
     echo "Using dataset path: ${ADE20K_DATASET_PATH}"
 fi
 
+# 2. Training Variables
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_rk4.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_rk4/best_checkpoint.pth
-WORK_DIR=./output/segmentation_logs/vim_tiny_vimseg_upernet_rk4
 
-# Check if we should resume training
+# 3. Resume Logic
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
+WORK_DIR=./output/segmentation_logs/vim_tiny_rorqual_vimseg_upernet_rk4
 RESUME_ARG=""
 CHECKPOINT_PATH=""
 
@@ -58,24 +60,25 @@ else
     MASTER_PORT=$((29500 + $$ % 500))
 fi
 export MASTER_PORT
-
 echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-# CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
-
-CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --standalone --nproc_per_node=2 --master_port $MASTER_PORT \
-    seg/train.py --launcher slurm \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port=$MASTER_PORT \
+    seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
     --work-dir ${WORK_DIR} \
-    ${RESUME_ARG}
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
-             train_dataloader.batch_size=32 \
+             train_dataloader.batch_size=48 \
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=rk4 \
-             optimizer.lr=0.001 \
+             optimizer.lr=1e-4 \
              optimizer.weight_decay=0.05 \
              train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
-             test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}"
+             test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+    ${RESUME_ARG}
+    # --use-wandb \
+    # --wandb-project visionmamba \
+    # --wandb-run-name vim_tiny_upernet_rk4_cc-rorqual \
+    # --wandb-tags segmentation rk4 cc-rorqual \
