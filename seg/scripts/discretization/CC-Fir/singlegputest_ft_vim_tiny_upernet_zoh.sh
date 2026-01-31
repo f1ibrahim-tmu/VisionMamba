@@ -66,13 +66,14 @@ CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_
     ${SEG_CONFIG} \
     --seed 0 \
     --options model.backbone.pretrained="${PRETRAIN_CKPT}" \
-             model.backbone.if_bimamba=False \
+             model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \
              optimizer.lr=1e-5 \
-             optimizer.weight_decay=0.05 \
+             optimizer.weight_decay=0.01 \
              train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             train_cfg.max_iters=200000 \
     --work-dir ${WORK_DIR} \
     ${RESUME_ARG}

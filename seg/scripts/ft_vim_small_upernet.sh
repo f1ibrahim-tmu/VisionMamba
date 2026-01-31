@@ -10,4 +10,4 @@ python3 -m torch.distributed.launch --nproc_per_node=4 --nnodes=${WORLD_SIZE} --
 --use_env train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 --work-dir work_dirs/vimseg-s --deterministic \
-    --options model.backbone.pretrained=${PRETRAIN_CKPT} model.backbone.if_bimamba=False model.backbone.bimamba_type=v2 optimizer.lr=1e-5 model.backbone.use_residual_as_feature=True model.backbone.last_layer_process=add optimizer.paramwise_cfg.layer_decay_rate=0.95
+    --options model.backbone.pretrained=${PRETRAIN_CKPT} model.backbone.if_bimamba=True model.backbone.bimamba_type=v2 optimizer.lr=1e-5 optimizer.weight_decay=0.01 train_cfg.max_iters=200000 model.backbone.use_residual_as_feature=True model.backbone.last_layer_process=add optimizer.paramwise_cfg.layer_decay_rate=0.95
