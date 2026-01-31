@@ -28,6 +28,7 @@ model = dict(
         if_divide_out=True,
         if_cls_token=False,
         discretization_method='rk4',  # Runge-Kutta 4th Order discretization
+        ssm_cfg=dict(dt_min=0.0005, dt_max=0.05, dt_scale=0.5),  # Moderate dt reduction for RK4 stability
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],

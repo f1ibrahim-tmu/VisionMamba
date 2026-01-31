@@ -28,6 +28,7 @@ model = dict(
         if_divide_out=True,
         if_cls_token=False,
         discretization_method='bilinear',  # Bilinear (Tustin) discretization
+        ssm_cfg=dict(dt_min=0.0005, dt_max=0.03, dt_scale=0.3),  # Stricter dt range for bilinear stability
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],

@@ -28,7 +28,7 @@ model = dict(
         final_pool_type='all',
         if_divide_out=True,
         if_cls_token=False,
-        discretization_method='zoh',  # Zero Order Hold discretization
+        discretization_method='zoh',  # Zero Order Hold discretization (uses defaults: dt_min=0.001, dt_max=0.1, dt_scale=1.0)
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],

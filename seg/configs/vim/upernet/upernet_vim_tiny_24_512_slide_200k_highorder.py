@@ -28,6 +28,7 @@ model = dict(
         if_divide_out=True,
         if_cls_token=False,
         discretization_method='highorder',  # Higher-Order Hold discretization
+        ssm_cfg=dict(dt_min=0.0003, dt_max=0.015, dt_scale=0.2),  # Stricter dt range for highorder stability
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],
