@@ -10,6 +10,8 @@ from .cascade_mask_rcnn_vimdet_b_100ep import (
 )
 
 train.init_checkpoint = "./output/detection_logs/vim_tiny_vimdet_rk4/checkpoint.pth"
+# Gradient clipping to prevent Inf/NaN divergence (RK4 discretization can be numerically unstable)
+train.clip_grad = dict(enabled=True, clip_type="norm", clip_value=1.0)
 
 model.backbone.net.embed_dim = 192
 model.backbone.net.depth = 24
