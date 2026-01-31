@@ -42,7 +42,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
              model.backbone.if_bimamba=False \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \
-             optimizer.lr=0.001 \
+             optimizer.lr=1e-5 \
              optimizer.weight_decay=0.05 \
     --work-dir output/segmentation_logs/vim_tiny_vimseg_upernet_zoh \
     ${RESUME_ARG}
