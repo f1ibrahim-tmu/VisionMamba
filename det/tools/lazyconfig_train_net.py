@@ -133,7 +133,11 @@ def do_train(args, cfg):
     train_loader = instantiate(cfg.dataloader.train)
 
     model = create_ddp_model(model, **cfg.train.ddp)
-    trainer = (AMPTrainer if cfg.train.amp.enabled else SimpleTrainer)(model, train_loader, optim)
+    if cfg.train.amp.enabled:
+        amp_precision = getattr(cfg.train.amp, "precision", torch.float16)
+        trainer = AMPTrainer(model, train_loader, optim, precision=amp_precision)
+    else:
+        trainer = SimpleTrainer(model, train_loader, optim)
     checkpointer = DetectionCheckpointer(
         model,
         cfg.train.output_dir,

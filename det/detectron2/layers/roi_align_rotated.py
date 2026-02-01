@@ -75,7 +75,7 @@ class ROIAlignRotated(nn.Module):
         """
         assert rois.dim() == 2 and rois.size(1) == 6
         orig_dtype = input.dtype
-        if orig_dtype == torch.float16:
+        if orig_dtype in (torch.float16, torch.bfloat16):
             input = input.float()
             rois = rois.float()
         output_size = _pair(self.output_size)
