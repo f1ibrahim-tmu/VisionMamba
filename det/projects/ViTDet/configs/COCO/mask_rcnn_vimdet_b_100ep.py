@@ -23,13 +23,13 @@ train.init_checkpoint = (
 
 
 # Schedule
-# 100 ep = 184375 iters * 64 images/iter / 118000 images/ep
-train.max_iter = 184375
+# 380k iters (scaled from 100ep schedule: 184375 -> 380000)
+train.max_iter = 380000
 
 lr_multiplier = L(WarmupParamScheduler)(
     scheduler=L(MultiStepParamScheduler)(
         values=[1.0, 0.1, 0.01],
-        milestones=[163889, 177546],
+        milestones=[337820, 365940],  # scaled from [163889, 177546] for 380k
         num_updates=train.max_iter,
     ),
     warmup_length=250 / train.max_iter,
