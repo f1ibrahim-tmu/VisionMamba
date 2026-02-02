@@ -173,7 +173,45 @@ Tighter bounds on `dt_min`, `dt_max`, and `dt_scale` constrain the learned step 
 
 ---
 
-## 6. References
+## 6. Post-failure recommendations (confirmed)
+
+These address NCCL timeouts and HPC job failures observed in Rorqual segmentation runs (see failure assessment). Solutions **#1** (NCCL timeout env) and **#2** (resume from checkpoint) are left to the user; **#3–#5** are checked and confirmed below.
+
+### #3 — Reduce validation frequency ✅ Implemented
+
+**Recommendation:** Use validation every 2000 iterations instead of 1000 to lower the chance of one rank stalling during slide inference and triggering NCCL timeouts.
+
+**Confirmed:** In `seg/configs/_base_/schedules/schedule_200k.py`:
+- `train_cfg.val_interval` set to **2000** (was 1000).
+- `evaluation.interval` set to **2000** (was 1000).
+
+All 200K segmentation runs that use this schedule now validate half as often; checkpoint interval remains 1000.
+
+### #4 — Stability changes from this report ✅ Already in place
+
+**Recommendation:** Use `ssm_cfg`, `weight_decay=0.01`, `if_bimamba=True`, 200K iters, and lr=1e-5 as in this report.
+
+**Confirmed:** Grep over `seg/` shows:
+- **ssm_cfg:** Set in configs for bilinear, foh, poly, highorder, rk4 (ZOH uses defaults).
+- **weight_decay=0.01:** In all 8 segmentation configs and all segmentation shell scripts.
+- **if_bimamba=True:** In all segmentation train/eval scripts (CC-Fir, CC-Rorqual, CVIS, main scripts).
+- **max_iters=200000:** In schedule_200k and script `--options`.
+- **lr=1e-5:** In configs and scripts.
+
+No further code changes needed for #4.
+
+### #5 — SLURM / wall time and resume ✅ Documented
+
+**Recommendation:** Ensure job wall time is long enough for 200K iterations; use checkpoint resume if jobs are preempted or hit limits.
+
+**Confirmed:** This repo does not contain SLURM submit scripts (no `#SBATCH` in seg/). Submission is external (e.g. Rorqual). Guidance:
+- **Wall time:** 200K iters at ~1.2 s/iter is ~67 hours of training; request at least **72 hours** (e.g. `#SBATCH --time=72:00:00`) so a single job can finish, or use shorter jobs and resume.
+- **Resume:** All segmentation scripts already look for `latest.pth` (or latest `.pth`) in the work dir and pass `--resume-from` when found; no code change needed.
+- **Reference:** Detection side uses `#SBATCH --time=48:00:00` in `DETECTION_TRAINING_FIXES.md`; segmentation 200K runs should use longer time or explicit resume strategy.
+
+---
+
+## 7. References
 
 - Vision Mamba paper (segmentation setup: bidirectional Mamba, 200K iters, weight_decay=0.01)
 - Mamba SSM: `mamba-1p1p1/mamba_ssm/modules/mamba_simple.py` (dt_min, dt_max, dt_scale)

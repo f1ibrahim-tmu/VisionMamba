@@ -13,7 +13,7 @@ param_scheduler = [
     )
 ]
 # runtime settings
-train_cfg = dict(type='IterBasedTrainLoop', max_iters=200000, val_interval=1000)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=200000, val_interval=2000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 default_hooks = dict(
@@ -23,4 +23,4 @@ default_hooks = dict(
     checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=1000, max_keep_ckpts=4),
     sampler_seed=dict(type='DistSamplerSeedHook'),
     visualization=dict(type='SegVisualizationHook'))
-evaluation = dict(interval=1000, metric='mIoU', save_best='mIoU', rule='greater')
+evaluation = dict(interval=2000, metric='mIoU', save_best='mIoU', rule='greater')
