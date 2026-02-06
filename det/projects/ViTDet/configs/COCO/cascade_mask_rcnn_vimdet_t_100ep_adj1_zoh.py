@@ -18,5 +18,6 @@ model.backbone.net.embed_dim = 192
 model.backbone.net.depth = 24
 model.backbone.net.pretrained = "./output/classification_logs/vim_tiny_zoh/best_checkpoint.pth"
 model.backbone.net.discretization_method = "zoh"  # Zero Order Hold discretization
+# ZOH intentionally uses Mamba default ssm_cfg (dt_min=0.001, dt_max=0.1, dt_scale=1.0); no override.
 
 optimizer.params.lr_factor_func = partial(get_vim_lr_decay_rate, num_layers=24, lr_decay_rate=0.837)

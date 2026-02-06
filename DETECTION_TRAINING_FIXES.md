@@ -67,3 +67,24 @@
 2. **LR scheduler order warning:** Logs show `lr_scheduler.step()` before `optimizer.step()`. This is a detectron2/trainer ordering issue; consider checking `det/detectron2/engine/train_loop.py` if the first LR value is skipped.
 
 3. **SSM hyperparameters:** Similar to segmentation, detection may benefit from tighter `dt_min`/`dt_max` bounds for non-ZOH methods. See `SEGMENTATION_DISCRETIZATION_REPORT.md` for reference values.
+
+---
+
+### 4. SSM `ssm_cfg` for Non-ZOH Detection (Feb 2026)
+
+**Problem:** All detection discretization configs used the Mamba default SSM step range (`dt_min=0.001`, `dt_max=0.1`, `dt_scale=1.0`). FOH showed stagnant `loss_mask` (~0.692) and no learning; segmentation already uses tighter `ssm_cfg` per method.
+
+**Fix:** Set `model.backbone.net.ssm_cfg` in detection configs to match segmentation values, and use stricter gradient clipping (`clip_value=0.5`) for all non-ZOH methods:
+- **FOH:** `dict(dt_min=0.0005, dt_max=0.02, dt_scale=0.25)` + `clip_value=0.5`
+- **Bilinear:** `dict(dt_min=0.0005, dt_max=0.03, dt_scale=0.3)` + `clip_value=0.5`
+- **Poly:** `dict(dt_min=0.0005, dt_max=0.02, dt_scale=0.3)` + `clip_value=0.5`
+- **Highorder:** `dict(dt_min=0.0003, dt_max=0.015, dt_scale=0.2)` + `clip_value=0.5`
+- **RK4:** `dict(dt_min=0.0005, dt_max=0.05, dt_scale=0.5)` + `clip_value=0.5`
+- **ZOH:** unchanged (uses Mamba default `ssm_cfg`; keeps `clip_value=1.0`). Config includes a one-line comment that ZOH intentionally uses default `ssm_cfg`.
+
+**Files modified:**
+- `det/projects/ViTDet/configs/COCO/cascade_mask_rcnn_vimdet_t_100ep_adj1_foh.py`
+- `det/projects/ViTDet/configs/COCO/cascade_mask_rcnn_vimdet_t_100ep_adj1_bilinear.py`
+- `det/projects/ViTDet/configs/COCO/cascade_mask_rcnn_vimdet_t_100ep_adj1_poly.py`
+- `det/projects/ViTDet/configs/COCO/cascade_mask_rcnn_vimdet_t_100ep_adj1_highorder.py`
+- `det/projects/ViTDet/configs/COCO/cascade_mask_rcnn_vimdet_t_100ep_adj1_rk4.py`
