@@ -52,6 +52,7 @@ optim_wrapper = dict(
         betas=(0.9, 0.999),
         weight_decay=0.01
     ),
+    clip_grad=dict(max_norm=1.0),
     constructor='VimLayerDecayOptimizerConstructor',
     paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
 )

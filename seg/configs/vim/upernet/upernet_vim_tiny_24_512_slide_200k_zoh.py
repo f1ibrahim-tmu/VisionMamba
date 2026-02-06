@@ -52,6 +52,7 @@ optim_wrapper = dict(
         betas=(0.9, 0.999),
         weight_decay=0.01
     ),
+    clip_grad=dict(max_norm=1.0),
     constructor='VimLayerDecayOptimizerConstructor',
     paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
 )
@@ -82,15 +83,3 @@ train_dataloader = dict(
     persistent_workers=True,
     sampler=dict(type='InfiniteSampler', shuffle=True)
 )
-
-# Backward compatibility: keep old format
-# MMEngine format: explicit dataloader configs (overrides base config)
-train_dataloader = dict(
-    batch_size=8,
-    num_workers=4,
-    persistent_workers=True,
-    sampler=dict(type='InfiniteSampler', shuffle=True)
-)
-
-# Backward compatibility: keep old format
-data=dict(samples_per_gpu=8, workers_per_gpu=4)
