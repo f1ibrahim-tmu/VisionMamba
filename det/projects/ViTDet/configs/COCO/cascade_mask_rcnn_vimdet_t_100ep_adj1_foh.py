@@ -10,8 +10,11 @@ from .cascade_mask_rcnn_vimdet_b_100ep import (
 )
 
 train.init_checkpoint = "./output/detection_logs/vim_tiny_vimdet_foh/checkpoint.pth"
-# Stricter gradient clipping for FOH (helps avoid mask-head collapse to uniform predictions)
-train.clip_grad = dict(enabled=True, clip_type="norm", clip_value=0.5)
+# Gradient clipping aligned with ZOH and seg FOH (1.0); 0.5 was starving detection heads
+train.clip_grad = dict(enabled=True, clip_type="norm", clip_value=1.0)
+
+# Longer warmup for FOH so detection heads can stabilize before backbone dominates
+lr_multiplier.warmup_length = 1000 / train.max_iter  # 1000 iters vs default 250
 
 # Model configuration
 model.backbone.net.embed_dim = 192
