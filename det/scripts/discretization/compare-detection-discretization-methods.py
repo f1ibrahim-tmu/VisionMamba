@@ -1,91 +1,117 @@
 #!/usr/bin/env python3
 """
-This script evaluates and compares Vision Mamba detection models trained with different discretization methods.
-It loads each model, evaluates it on the MS-COCO validation set, and compares their performance.
+Compare Vision Mamba detection runs across discretization methods.
+
+Reads metrics.json (Detectron2 line-delimited JSON) from each run's output dir and
+extracts the last COCO evaluation (bbox/AP, segm/AP, AP50, AP75). Supports Rorqual
+and Fir output layouts (--layout rorqual|fir, --work-dirs pointing to the base dir
+that contains vim_tiny_rorqual_vimdet_* or vim_tiny_fir_vimdet_* subdirs).
+
+Example:
+  python compare-detection-discretization-methods.py --work-dirs output/detection_logs --layout rorqual
+  python compare-detection-discretization-methods.py --work-dirs /path/to/rorqual_detection_logs --layout rorqual
 """
 
-import os
-import sys
 import argparse
-import torch
-import torch.nn as nn
+import json
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
-import json
 
 # Add the det directory to the path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+# Subdir names used by CC-Rorqual and CC-Fir detection scripts (output/detection_logs/<subdir>)
+LAYOUT_SUBDIRS = {
+    "rorqual": {
+        "ZOH (Default)": "vim_tiny_rorqual_vimdet_zoh",
+        "First Order Hold (FOH)": "vim_tiny_rorqual_vimdet_foh",
+        "Bilinear (Tustin)": "vim_tiny_rorqual_vimdet_bilinear",
+        "Polynomial Interpolation": "vim_tiny_rorqual_vimdet_poly",
+        "Higher-Order Hold": "vim_tiny_rorqual_vimdet_highorder",
+        "Runge-Kutta 4th Order (RK4)": "vim_tiny_rorqual_vimdet_rk4",
+    },
+    "fir": {
+        "ZOH (Default)": "vim_tiny_fir_vimdet_zoh",
+        "First Order Hold (FOH)": "vim_tiny_fir_vimdet_foh",
+        "Bilinear (Tustin)": "vim_tiny_fir_vimdet_bilinear",
+        "Polynomial Interpolation": "vim_tiny_fir_vimdet_poly",
+        "Higher-Order Hold": "vim_tiny_fir_vimdet_highorder",
+        "Runge-Kutta 4th Order (RK4)": "vim_tiny_fir_vimdet_rk4",
+    },
+}
+
+
 def get_args_parser():
     parser = argparse.ArgumentParser('Compare Vision Mamba Detection Discretization Methods', add_help=False)
-    parser.add_argument('--work-dirs', default='work_dirs', type=str, help='Path to work directories')
+    parser.add_argument(
+        '--work-dirs',
+        default='output/detection_logs',
+        type=str,
+        help='Base path to detection run dirs (e.g. output/detection_logs or /path/to/rorqual_detection_logs)',
+    )
+    parser.add_argument(
+        '--layout',
+        default='rorqual',
+        choices=['rorqual', 'fir'],
+        type=str,
+        help='Output dir layout: rorqual (vim_tiny_rorqual_vimdet_*) or fir (vim_tiny_fir_vimdet_*)',
+    )
     parser.add_argument('--output', default='./detection_discretization_comparison', type=str, help='Output directory for results')
     parser.add_argument('--config-dir', default='projects/ViTDet/configs/COCO', type=str, help='Path to config files')
     return parser
 
-def load_model_results(work_dir, method_name):
-    """Load results from a trained model's work directory"""
-    results = {}
-    
-    # Look for log files and checkpoints
-    log_files = list(Path(work_dir).glob("*.log"))
-    checkpoint_files = list(Path(work_dir).glob("*.pth"))
-    
-    if log_files:
-        # Parse log file for metrics
-        log_file = log_files[0]
-        try:
-            with open(log_file, 'r') as f:
-                lines = f.readlines()
-                # Extract final COCO metrics from the last few lines
-                for line in reversed(lines[-100:]):  # Check last 100 lines
-                    if 'bbox AP' in line or 'segm AP' in line:
-                        # Parse COCO metrics from log line
-                        parts = line.strip().split()
-                        for i, part in enumerate(parts):
-                            if 'bbox' in part and 'AP' in part and i + 1 < len(parts):
-                                results['bbox_AP'] = float(parts[i + 1].rstrip(','))
-                            elif 'segm' in part and 'AP' in part and i + 1 < len(parts):
-                                results['segm_AP'] = float(parts[i + 1].rstrip(','))
-                            elif 'AP50' in part and i + 1 < len(parts):
-                                results['AP50'] = float(parts[i + 1].rstrip(','))
-                            elif 'AP75' in part and i + 1 < len(parts):
-                                results['AP75'] = float(parts[i + 1].rstrip(','))
-        except Exception as e:
-            print(f"Error parsing log file {log_file}: {e}")
-    
-    # Add method name
-    results['method'] = method_name
-    results['work_dir'] = str(work_dir)
-    
+
+def load_model_results_from_metrics_json(work_dir, method_name):
+    """
+    Load COCO metrics from a run's metrics.json (Detectron2 line-delimited JSON).
+    Uses the last evaluation line (contains bbox/AP, segm/AP) as the final result.
+    """
+    results = {"method": method_name, "work_dir": str(work_dir)}
+    metrics_file = Path(work_dir) / "metrics.json"
+    if not metrics_file.exists():
+        return results
+    last_eval = None
+    try:
+        with open(metrics_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or '"bbox/AP":' not in line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if "bbox/AP" in obj:
+                        last_eval = obj
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print(f"Error reading {metrics_file}: {e}")
+        return results
+    if last_eval:
+        results["bbox_AP"] = last_eval["bbox/AP"]
+        results["segm_AP"] = last_eval.get("segm/AP")
+        results["AP50"] = last_eval.get("bbox/AP50")
+        results["AP75"] = last_eval.get("bbox/AP75")
+        results["iteration"] = last_eval.get("iteration")
     return results
 
 def compare_detection_methods(args):
-    """Compare all detection discretization methods"""
-    
-    # Define the methods and their expected work directories
-    methods = {
-        'ZOH (Default)': 'cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh-4gpu',
-        'First Order Hold (FOH)': 'cascade_mask_rcnn_vimdet_t_100ep_adj1_foh-4gpu', 
-        'Bilinear (Tustin)': 'cascade_mask_rcnn_vimdet_t_100ep_adj1_bilinear-4gpu',
-        'Polynomial Interpolation': 'cascade_mask_rcnn_vimdet_t_100ep_adj1_poly-4gpu',
-        'Higher-Order Hold': 'cascade_mask_rcnn_vimdet_t_100ep_adj1_highorder-4gpu',
-        'Runge-Kutta 4th Order (RK4)': 'cascade_mask_rcnn_vimdet_t_100ep_adj1_rk4-4gpu'
-    }
-    
+    """Compare all detection discretization methods using metrics.json from each run."""
+    methods = LAYOUT_SUBDIRS[args.layout]
     results = []
-    
-    print("Loading results from trained models...")
+
+    print(f"Layout: {args.layout}, work-dirs: {args.work_dirs}")
+    print("Loading results from metrics.json...")
     for method_name, work_dir_name in methods.items():
         work_dir = Path(args.work_dirs) / work_dir_name
         if work_dir.exists():
-            print(f"Loading results for {method_name}...")
-            result = load_model_results(work_dir, method_name)
+            print(f"  Loading {method_name} from {work_dir}...")
+            result = load_model_results_from_metrics_json(work_dir, method_name)
             results.append(result)
         else:
-            print(f"Warning: Work directory {work_dir} not found for {method_name}")
+            print(f"  Warning: Work directory {work_dir} not found for {method_name}")
     
     if not results:
         print("No results found! Make sure the models have been trained.")
@@ -170,8 +196,12 @@ def compare_detection_methods(args):
         # Performance improvement plot
         plt.subplot(2, 3, 6)
         if 'bbox_AP' in df.columns:
-            baseline = df[df['method'] == 'ZOH (Default)']['bbox_AP'].iloc[0] if 'ZOH (Default)' in df['method'].values else df['bbox_AP'].iloc[0]
-            improvements = df['bbox_AP'] - baseline
+            zoh_row = df[df['method'] == 'ZOH (Default)']
+            if len(zoh_row) and pd.notna(zoh_row['bbox_AP'].iloc[0]):
+                baseline = zoh_row['bbox_AP'].iloc[0]
+            else:
+                baseline = df['bbox_AP'].dropna().iloc[0] if df['bbox_AP'].notna().any() else 0.0
+            improvements = df['bbox_AP'].fillna(0) - baseline
             colors = ['green' if x > 0 else 'red' for x in improvements]
             plt.bar(df['method'], improvements, color=colors)
             plt.title('Performance Improvement over ZOH (Bbox AP)')
@@ -183,7 +213,7 @@ def compare_detection_methods(args):
         plot_path = output_dir / 'detection_discretization_comparison.png'
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         print(f"Comparison plot saved to {plot_path}")
-        plt.show()
+        plt.close()
     
     # Print summary
     print("\n" + "="*80)
