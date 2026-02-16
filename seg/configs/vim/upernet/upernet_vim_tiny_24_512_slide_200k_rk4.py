@@ -3,7 +3,7 @@
 # --------------------------------------------------------'
 _base_ = [
     '../../_base_/models/upernet_vim.py', '../../_base_/datasets/ade20k.py',
-    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_60k.py'
+    '../../_base_/default_runtime.py', '../../_base_/schedules/schedule_200k.py'
 ]
 crop_size = (512, 512)
 
@@ -28,6 +28,7 @@ model = dict(
         if_divide_out=True,
         if_cls_token=False,
         discretization_method='rk4',  # Runge-Kutta 4th Order discretization
+        ssm_cfg=dict(dt_min=0.0005, dt_max=0.05, dt_scale=0.5),  # Moderate dt reduction for RK4 stability
     ),
     decode_head=dict(
         in_channels=[192, 192, 192, 192],
@@ -41,33 +42,47 @@ model = dict(
     test_cfg = dict(mode='slide', crop_size=crop_size, stride=(341, 341))
 )
 
-optimizer = dict(_delete_=True, 
-                 type='AdamW', 
-                 lr=1e-4, 
-                 betas=(0.9, 0.999), 
-                 weight_decay=0.05,
-                 constructor='LayerDecayOptimizerConstructor', 
-                 paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
-                )
+# MMSeg 1.x format: constructor and paramwise_cfg go in optim_wrapper
+optim_wrapper = dict(
+    _delete_=True,
+    type='OptimWrapper',
+    optimizer=dict(
+        type='AdamW',
+        lr=1e-5,
+        betas=(0.9, 0.999),
+        weight_decay=0.01
+    ),
+    clip_grad=dict(max_norm=1.0),
+    constructor='VimLayerDecayOptimizerConstructor',
+    paramwise_cfg=dict(num_layers=24, layer_decay_rate=0.92)
+)
 
-lr_config = dict(_delete_=True, policy='poly',
-                 warmup='linear',
-                 warmup_iters=1500,
-                 warmup_ratio=1e-6,
-                 power=1.0, min_lr=0.0, by_epoch=False)
+param_scheduler = [
+    dict(
+        type='LinearLR',
+        start_factor=1e-6,
+        by_epoch=False,
+        begin=0,
+        end=1500
+    ),
+    dict(
+        type='PolyLR',
+        eta_min=0.0,
+        power=1.0,
+        begin=1500,
+        end=200000,
+        by_epoch=False
+    )
+]
 
 # By default, models are trained on 4 GPUs with 8 images per GPU
-data=dict(samples_per_gpu=8, workers_per_gpu=16)
-
-runner = dict(type='IterBasedRunnerAmp')
-
-# do not use mmdet version fp16
-fp16 = None
-optimizer_config = dict(
-    type="DistOptimizerHook",
-    update_interval=1,
-    grad_clip=None,
-    coalesce=True,
-    bucket_size_mb=-1,
-    use_fp16=False,
+# MMEngine format: explicit dataloader configs (overrides base config)
+train_dataloader = dict(
+    batch_size=8,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='InfiniteSampler', shuffle=True)
 )
+
+# Backward compatibility: keep old format
+data=dict(samples_per_gpu=8, workers_per_gpu=4)

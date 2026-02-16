@@ -1,7 +1,6 @@
 addict==2.4.0
 aliyun-python-sdk-core==2.15.1
 aliyun-python-sdk-kms==2.16.3
-apex 
 asttokens==2.4.1
 attrs==23.1.0
 Automat==22.10.0
@@ -58,8 +57,9 @@ MarkupSafe==2.1.5
 matplotlib==3.9.0
 matplotlib-inline==0.1.7
 mmcls==0.25.0
-mmcv-full==1.7.1
-mmsegmentation==0.29.1
+mmengine>=0.10.0
+mmcv>=2.0.0
+mmsegmentation>=1.0.0
 model-index==0.1.11
 msgpack==1.0.8
 ninja==1.11.1.1
