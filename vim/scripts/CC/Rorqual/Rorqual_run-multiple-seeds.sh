@@ -1,10 +1,13 @@
 #!/bin/bash
 # Run training with multiple random seeds for all discretization methods
 # This script runs each method with 5 different seeds (0-4) for statistical significance
+# Usage: $0 [local_data]
+# Example (Rorqual): $0 /path/to/Rorqual/cifar100
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+LOCAL_DATA="${1:-}"
 SEEDS=(0 1 2 3 4)  # 5 different seeds for Mean ± Std calculation
 
 echo "=========================================="
@@ -28,7 +31,7 @@ run_method_seeds() {
         echo "Running $METHOD with seed: $SEED"
         echo "----------------------------------------"
         
-        bash "$SCRIPT" $SEED
+        bash "$SCRIPT" "${LOCAL_DATA:-}" $SEED
         
         if [ $? -eq 0 ]; then
             echo "✓ Completed $METHOD seed $SEED"

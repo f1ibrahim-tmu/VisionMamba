@@ -1,22 +1,25 @@
 #!/bin/bash
 # Run a single discretization method with multiple random seeds
-# Usage: ./Rorqual_run-single-method-seeds.sh <method> [seeds]
+# Usage: ./Rorqual_run-single-method-seeds.sh <method> [seeds] [local_data]
 # Example: ./Rorqual_run-single-method-seeds.sh zoh
 # Example: ./Rorqual_run-single-method-seeds.sh highorder 0,1,2,3,4
+# Example: ./Rorqual_run-single-method-seeds.sh zoh 0,1 /path/to/Rorqual/cifar100
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <method> [seeds]"
+    echo "Usage: $0 <method> [seeds] [local_data]"
     echo "Methods: zoh, foh, bilinear, poly, highorder, rk4"
     echo "Example: $0 zoh"
     echo "Example: $0 highorder 0,1,2,3,4"
+    echo "Example: $0 zoh 0,1 /path/to/Rorqual/cifar100"
     exit 1
 fi
 
 METHOD=$1
 SEEDS_STR=${2:-"0,1,2,3,4"}
+LOCAL_DATA=${3:-}
 
 # Convert comma-separated seeds to array
 IFS=',' read -ra SEEDS <<< "$SEEDS_STR"
@@ -65,7 +68,7 @@ for SEED in "${SEEDS[@]}"; do
     echo "Running with seed: $SEED"
     echo "----------------------------------------"
     
-    bash "$SCRIPT" $SEED
+    bash "$SCRIPT" "${LOCAL_DATA:-}" $SEED
     
     if [ $? -eq 0 ]; then
         echo "✓ Completed seed $SEED"

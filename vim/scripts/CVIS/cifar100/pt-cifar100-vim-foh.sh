@@ -19,7 +19,7 @@ OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.001 \
-    --num_workers 0 \
+    --num_workers 4 \
     --input-size 32 \
     --data-set CIFAR \
     --data-path /data/fady/datasets/cifar100 \

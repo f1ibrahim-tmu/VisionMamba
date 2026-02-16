@@ -13,11 +13,12 @@ import torch
 from PIL import Image
 
 try:
-    from shapely.geometry import MultiPolygon
+    from shapely.geometry import MultiPolygon, GeometryCollection
 except ImportError:
     MultiPolygon = None
+    GeometryCollection = None
 
-# Monkey-patch fvcore to handle MultiPolygon objects in apply_polygons
+# Monkey-patch fvcore to handle MultiPolygon and GeometryCollection objects in apply_polygons
 # This fixes the issue where fvcore's Transform classes create MultiPolygon objects
 # internally and then try to iterate over them, causing TypeError
 if MultiPolygon is not None:
@@ -94,6 +95,44 @@ if MultiPolygon is not None:
                 return processed_result
             
             TransformList.apply_polygons = _patched_transformlist_apply_polygons
+
+        # Patch CropTransform specifically - it overrides apply_polygons and can return
+        # GeometryCollection from Shapely's intersection(), which is not iterable in Shapely 2.0
+        from fvcore.transforms.transform import CropTransform
+        if hasattr(CropTransform, 'apply_polygons'):
+            _original_crop_apply_polygons = CropTransform.apply_polygons
+
+            def _patched_crop_apply_polygons(self, polygons):
+                """Patched CropTransform that handles GeometryCollection from Shapely 2.0."""
+                import shapely.geometry as geometry
+
+                crop_box = geometry.box(
+                    self.x0, self.y0, self.x0 + self.w, self.y0 + self.h
+                ).buffer(0.0)
+
+                cropped_polygons = []
+                for polygon in polygons:
+                    polygon = geometry.Polygon(polygon).buffer(0.0)
+                    if not polygon.is_valid:
+                        continue
+                    cropped = polygon.intersection(crop_box)
+                    if cropped.is_empty:
+                        continue
+                    # Handle GeometryCollection (Shapely 2.0+) - use .geoms, not direct iteration
+                    if GeometryCollection is not None and isinstance(cropped, GeometryCollection):
+                        geom_iter = cropped.geoms
+                    elif hasattr(cropped, 'geoms') and not isinstance(cropped, geometry.Polygon):
+                        geom_iter = cropped.geoms
+                    else:
+                        geom_iter = [cropped]
+                    for poly in geom_iter:
+                        if not isinstance(poly, geometry.Polygon) or not poly.is_valid:
+                            continue
+                        coords = np.asarray(poly.exterior.coords)
+                        cropped_polygons.append(coords[:-1])
+                return [self.apply_coords(p) for p in cropped_polygons]
+
+            CropTransform.apply_polygons = _patched_crop_apply_polygons
     except (ImportError, AttributeError):
         # If fvcore is not available or structure changed, skip patching
         pass
