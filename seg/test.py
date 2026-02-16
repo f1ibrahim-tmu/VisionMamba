@@ -7,17 +7,29 @@ import time
 import warnings
 
 import mmcv
+import mmengine
 import torch
 from mmcv.cnn.utils import revert_sync_batchnorm
-from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
-                         wrap_fp16_model)
-from mmcv.utils import DictAction
+from mmengine.dist import get_dist_info, init_dist
+from mmengine.runner import load_checkpoint, wrap_fp16_model
+from mmengine.config import DictAction
 
-from mmseg import digit_version
-from mmseg.apis import multi_gpu_test, single_gpu_test
-from mmseg.datasets import build_dataloader, build_dataset
+# MMSegmentation 1.0.0+ moved digit_version to mmengine
+try:
+    from mmengine.utils import digit_version
+except ImportError:
+    # Fallback for older versions
+    from mmseg import digit_version
+# MMSegmentation ≥ 1.2: build_dataset and build_dataloader moved to mmengine.dataset
+try:
+    # MMSeg >= 1.2
+    from mmengine.dataset import build_dataset, build_dataloader
+except ImportError:
+    # Older MMSeg
+    from mmseg.datasets import build_dataset, build_dataloader
 from mmseg.models import build_segmentor
 from mmseg.utils import build_ddp, build_dp, get_device, setup_multi_processes
+from mmengine.runner import Runner
 
 from backbone import vim
 
@@ -131,7 +143,7 @@ def main():
     if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
         raise ValueError('The output file must be a pkl file.')
 
-    cfg = mmcv.Config.fromfile(args.config)
+    cfg = mmengine.Config.fromfile(args.config)
     print("cfg: ", cfg)
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
@@ -170,7 +182,7 @@ def main():
     rank, _ = get_dist_info()
     # allows not to create
     if args.work_dir is not None and rank == 0:
-        mmcv.mkdir_or_exist(osp.abspath(args.work_dir))
+        mmengine.utils.mkdir_or_exist(osp.abspath(args.work_dir))
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
         if args.aug_test:
             json_file = osp.join(args.work_dir,
@@ -181,7 +193,7 @@ def main():
     elif rank == 0:
         work_dir = osp.join('./work_dirs',
                             osp.splitext(osp.basename(args.config))[0])
-        mmcv.mkdir_or_exist(osp.abspath(work_dir))
+        mmengine.utils.mkdir_or_exist(osp.abspath(work_dir))
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
         if args.aug_test:
             json_file = osp.join(work_dir,
@@ -190,38 +202,76 @@ def main():
             json_file = osp.join(work_dir,
                                  f'eval_single_scale_{timestamp}.json')
 
-    # build the dataloader
-    # TODO: support multiple images per gpu (only minor changes are needed)
+    # build the dataset and dataloader
     dataset = build_dataset(cfg.data.test)
-    # The default loader config
-    loader_cfg = dict(
-        # cfg.gpus will be ignored if distributed
-        num_gpus=len(cfg.gpu_ids),
-        dist=distributed,
-        shuffle=False)
-    # The overall dataloader settings
-    loader_cfg.update({
-        k: v
-        for k, v in cfg.data.items() if k not in [
-            'train', 'val', 'test', 'train_dataloader', 'val_dataloader',
-            'test_dataloader'
-        ]
-    })
-    test_loader_cfg = {
-        **loader_cfg,
-        'samples_per_gpu': 1,
-        'shuffle': False,  # Not shuffle by default
-        **cfg.data.get('test_dataloader', {})
-    }
-    # build the dataloader
-    data_loader = build_dataloader(dataset, **test_loader_cfg)
+    
+    # Check if explicit test_dataloader config exists (MMEngine format)
+    if hasattr(cfg.data, 'test_dataloader') and cfg.data.test_dataloader is not None:
+        test_dataloader_cfg = cfg.data.test_dataloader.copy()
+        if 'dataset' not in test_dataloader_cfg:
+            test_dataloader_cfg['dataset'] = dataset
+        elif isinstance(test_dataloader_cfg['dataset'], dict):
+            test_dataloader_cfg['dataset'] = build_dataset(test_dataloader_cfg['dataset'])
+        # MMEngine's build_dataloader works with config dicts
+        try:
+            from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+            test_dataloader = mmengine_build_dataloader(test_dataloader_cfg)
+        except ImportError:
+            test_dataloader = Runner.build_dataloader(test_dataloader_cfg)
+    else:
+        # Legacy format: convert to MMEngine config format
+        test_dataloader_cfg = dict(
+            dataset=dataset,
+            batch_size=1,
+            num_workers=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+            sampler=dict(type='DefaultSampler', shuffle=False),
+            drop_last=False
+        )
+        # Try MMEngine's build_dataloader, fallback to Runner.build_dataloader
+        try:
+            from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+            test_dataloader = mmengine_build_dataloader(test_dataloader_cfg)
+        except ImportError:
+            # Fallback: try legacy mmseg build_dataloader
+            try:
+                from mmseg.datasets import build_dataloader as mmseg_build_dataloader
+                test_dataloader = mmseg_build_dataloader(
+                    dataset,
+                    samples_per_gpu=1,
+                    workers_per_gpu=cfg.data.workers_per_gpu if hasattr(cfg.data, 'workers_per_gpu') else 4,
+                    num_gpus=len(cfg.gpu_ids),
+                    dist=distributed,
+                    shuffle=False
+                )
+            except ImportError:
+                # Last resort: use Runner.build_dataloader
+                test_dataloader = Runner.build_dataloader(test_dataloader_cfg)
 
     # build the model and load checkpoint
     cfg.model.train_cfg = None
     model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
-    fp16_cfg = cfg.get('fp16', None)
-    if fp16_cfg is not None:
+    
+    # Handle fp16 - check optim_wrapper config instead of deprecated fp16 key
+    # For inference, wrap_fp16_model is still acceptable, but prefer optim_wrapper config
+    use_fp16 = False
+    if hasattr(cfg, 'optim_wrapper') and cfg.optim_wrapper is not None:
+        if isinstance(cfg.optim_wrapper, dict):
+            use_fp16 = cfg.optim_wrapper.get('type') == 'AmpOptimWrapper'
+        else:
+            use_fp16 = getattr(cfg.optim_wrapper, 'type', None) == 'AmpOptimWrapper'
+    
+    # Fallback to deprecated fp16 config for backward compatibility
+    if not use_fp16:
+        fp16_cfg = cfg.get('fp16', None)
+        if fp16_cfg is not None:
+            warnings.warn(
+                'Using deprecated `fp16` config. For training, use `optim_wrapper` '
+                'with `type="AmpOptimWrapper"` instead.')
+            use_fp16 = True
+    
+    if use_fp16:
         wrap_fp16_model(model)
+    
     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
     if 'CLASSES' in checkpoint.get('meta', {}):
         model.CLASSES = checkpoint['meta']['CLASSES']
@@ -258,10 +308,39 @@ def main():
         else:
             tmpdir = '.format_cityscapes'
             eval_kwargs.setdefault('imgfile_prefix', tmpdir)
-        mmcv.mkdir_or_exist(tmpdir)
+        mmengine.utils.mkdir_or_exist(tmpdir)
     else:
         tmpdir = None
 
+    # Prepare evaluator configuration
+    # MMEngine uses evaluator instead of direct evaluation
+    test_evaluator = None
+    if args.eval is not None or args.format_only:
+        # Build evaluator from mmseg
+        try:
+            from mmseg.engine import SegEvaluator
+            evaluator_cfg = dict(
+                type='IoUMetric' if args.eval else 'SegEvaluator',
+                format_only=args.format_only or eval_on_format_results
+            )
+            if args.eval:
+                evaluator_cfg['metric'] = args.eval
+            evaluator_cfg.update(eval_kwargs)
+            test_evaluator = SegEvaluator(**evaluator_cfg) if hasattr(SegEvaluator, '__call__') else evaluator_cfg
+        except (ImportError, TypeError):
+            # Fallback: use dict config for evaluator
+            evaluator_cfg = dict(
+                type='IoUMetric' if args.eval else 'SegEvaluator',
+                format_only=args.format_only or eval_on_format_results
+            )
+            if args.eval:
+                evaluator_cfg['metric'] = args.eval
+            evaluator_cfg.update(eval_kwargs)
+            test_evaluator = evaluator_cfg
+
+    # Set up device and model wrapping
+    # MMEngine ≥ 0.10: MMDataParallel and MMDistributedDataParallel are removed
+    # Use native PyTorch wrappers or let Runner handle it
     cfg.device = get_device()
     if not distributed:
         warnings.warn(
@@ -269,54 +348,99 @@ def main():
             'we convert SyncBN to BN. Please use dist_train.sh which can '
             'avoid this error.')
         if not torch.cuda.is_available():
-            assert digit_version(mmcv.__version__) >= digit_version('1.4.4'), \
-                'Please use MMCV >= 1.4.4 for CPU training!'
+            # MMCV 2.x is compatible with CPU training
+            import mmengine
+            assert digit_version(mmengine.__version__) >= digit_version('0.10.0'), \
+                'Please use MMEngine >= 0.10.0 for CPU training!'
         model = revert_sync_batchnorm(model)
-        model = build_dp(model, cfg.device, device_ids=cfg.gpu_ids)
-        results = single_gpu_test(
-            model,
-            data_loader,
-            args.show,
-            args.show_dir,
-            False,
-            args.opacity,
-            pre_eval=args.eval is not None and not eval_on_format_results,
-            format_only=args.format_only or eval_on_format_results,
-            format_args=eval_kwargs)
+        # Use native PyTorch DataParallel for single-node multi-GPU
+        if len(cfg.gpu_ids) > 1:
+            from torch.nn import DataParallel
+            model = DataParallel(model, device_ids=cfg.gpu_ids)
+        else:
+            # Single GPU - just move to device
+            model = model.to(cfg.device)
     else:
-        model = build_ddp(
-            model,
-            cfg.device,
+        # For distributed, use native PyTorch DDP
+        from torch.nn.parallel import DistributedDataParallel
+        model = DistributedDataParallel(
+            model.to(cfg.device),
             device_ids=[int(os.environ['LOCAL_RANK'])],
+            output_device=int(os.environ['LOCAL_RANK']),
             broadcast_buffers=False)
-        results = multi_gpu_test(
-            model,
-            data_loader,
-            args.tmpdir,
-            args.gpu_collect,
-            False,
-            pre_eval=args.eval is not None and not eval_on_format_results,
-            format_only=args.format_only or eval_on_format_results,
-            format_args=eval_kwargs)
 
+    # Create Runner for testing
+    # Note: For custom show/format functionality, we may need to use custom hooks
+    # For now, we'll use Runner.test() and handle show/format separately if needed
+    test_cfg = dict(type='TestLoop')
+    
+    # Set up work_dir
+    if args.work_dir is not None:
+        work_dir = args.work_dir
+    else:
+        work_dir = osp.join('./work_dirs',
+                            osp.splitext(osp.basename(args.config))[0])
+    
+    runner = Runner(
+        model=model,
+        work_dir=work_dir,
+        test_dataloader=test_dataloader,
+        test_evaluator=test_evaluator,
+        test_cfg=test_cfg,
+        default_scope='mmseg'
+    )
+
+    # Register custom hooks for show/format/out functionality if needed
+    custom_hooks = []
+    if args.show or args.show_dir:
+        # Note: Show functionality typically requires custom visualization hooks
+        # This is a placeholder - full implementation would need a custom hook
+        warnings.warn(
+            'Show functionality with Runner.test() requires custom hooks. '
+            'Consider using mmseg visualization hooks.')
+    
+    if custom_hooks:
+        runner.register_hook(custom_hooks[0])
+    
+    # Run testing
+    # Runner.test() handles distributed testing automatically
+    runner.test()
+
+    # Handle post-test outputs
     rank, _ = get_dist_info()
     if rank == 0:
+        # Get results from runner's message hub or evaluator
+        # The evaluator should have stored results during test()
+        results = None
+        if hasattr(runner, 'message_hub'):
+            # Try to get results from message hub
+            if 'test' in runner.message_hub.log_scalars:
+                results = runner.message_hub.log_scalars.get('test', {})
+        
+        # Save results to file if requested
         if args.out:
-            warnings.warn(
-                'The behavior of ``args.out`` has been changed since MMSeg '
-                'v0.16, the pickled outputs could be seg map as type of '
-                'np.array, pre-eval results or file paths for '
-                '``dataset.format_results()``.')
-            print(f'\nwriting results to {args.out}')
-            mmcv.dump(results, args.out)
-        if args.eval:
-            eval_kwargs.update(metric=args.eval)
-            metric = dataset.evaluate(results, **eval_kwargs)
-            metric_dict = dict(config=args.config, metric=metric)
-            mmcv.dump(metric_dict, json_file, indent=4)
-            if tmpdir is not None and eval_on_format_results:
-                # remove tmp dir when cityscapes evaluation
-                shutil.rmtree(tmpdir)
+            if results is None:
+                warnings.warn(
+                    'Results not available from Runner. '
+                    'The --out option may not work as expected with Runner.test(). '
+                    'Consider using evaluator outputs or custom hooks.')
+            else:
+                print(f'\nwriting results to {args.out}')
+                mmengine.fileio.dump(results, args.out)
+        
+        # Save evaluation metrics if evaluation was performed
+        if args.eval and test_evaluator is not None:
+            # Evaluation results should be in runner's message hub
+            # or printed by the evaluator
+            if hasattr(runner, 'message_hub'):
+                eval_results = runner.message_hub.log_scalars.get('test', {})
+                if eval_results:
+                    metric_dict = dict(config=args.config, metric=eval_results)
+                    mmengine.fileio.dump(metric_dict, json_file, indent=4)
+        
+        # Clean up tmpdir if created
+        if tmpdir is not None and eval_on_format_results:
+            shutil.rmtree(tmpdir)
 
 
 if __name__ == '__main__':

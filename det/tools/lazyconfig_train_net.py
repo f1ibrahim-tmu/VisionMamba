@@ -15,6 +15,7 @@ in the config file and implement a new train_net.py to handle them.
 import logging
 import os
 import sys
+import types
 
 # Ensure we import from local det/detectron2 directory
 # Get the directory containing this script (det/tools/)
@@ -39,8 +40,54 @@ from detectron2.engine import (
 from detectron2.engine.defaults import create_ddp_model
 from detectron2.evaluation import inference_on_dataset, print_csv_format
 from detectron2.utils import comm
+import torch
+import argparse
 
 logger = logging.getLogger("detectron2")
+
+
+def _apply_gradient_clipping(optimizer, clip_config):
+    """
+    Wrap optimizer's step method to apply gradient clipping.
+    
+    Args:
+        optimizer: torch.optim.Optimizer instance
+        clip_config: dict with keys:
+            - enabled: bool
+            - clip_type: "norm" or "value"
+            - clip_value: float (max norm or max value)
+            - norm_type: float (for norm clipping, default 2.0)
+    """
+    if not clip_config.get("enabled", False):
+        return optimizer
+    
+    clip_type = clip_config.get("clip_type", "norm")
+    clip_value = clip_config.get("clip_value", 1.0)
+    norm_type = clip_config.get("norm_type", 2.0)
+    
+    original_step = optimizer.step
+    
+    def step_with_clipping(self, closure=None):
+        if clip_type == "norm":
+            # Clip by norm
+            torch.nn.utils.clip_grad_norm_(
+                [p for group in self.param_groups for p in group["params"]],
+                clip_value,
+                norm_type
+            )
+        elif clip_type == "value":
+            # Clip by value
+            torch.nn.utils.clip_grad_value_(
+                [p for group in self.param_groups for p in group["params"]],
+                clip_value
+            )
+        return original_step(closure)
+    
+    # Bind the function as a method to preserve __self__ attribute
+    # This is required for PyTorch's LR scheduler which accesses method.__self__
+    optimizer.step = types.MethodType(step_with_clipping, optimizer)
+    logger.info(f"Gradient clipping enabled: type={clip_type}, value={clip_value}")
+    return optimizer
 
 
 def do_test(cfg, model):
@@ -78,32 +125,64 @@ def do_train(args, cfg):
 
     cfg.optimizer.params.model = model
     optim = instantiate(cfg.optimizer)
+    
+    # Apply gradient clipping if configured
+    if hasattr(cfg.train, "clip_grad") and cfg.train.clip_grad:
+        optim = _apply_gradient_clipping(optim, cfg.train.clip_grad)
 
     train_loader = instantiate(cfg.dataloader.train)
 
     model = create_ddp_model(model, **cfg.train.ddp)
-    trainer = (AMPTrainer if cfg.train.amp.enabled else SimpleTrainer)(model, train_loader, optim)
+    if cfg.train.amp.enabled:
+        amp_precision = getattr(cfg.train.amp, "precision", torch.float16)
+        trainer = AMPTrainer(model, train_loader, optim, precision=amp_precision)
+    else:
+        trainer = SimpleTrainer(model, train_loader, optim)
     checkpointer = DetectionCheckpointer(
         model,
         cfg.train.output_dir,
         trainer=trainer,
     )
-    trainer.register_hooks(
-        [
-            hooks.IterationTimer(),
-            hooks.LRScheduler(scheduler=instantiate(cfg.lr_multiplier)),
-            hooks.PeriodicCheckpointer(checkpointer, **cfg.train.checkpointer)
-            if comm.is_main_process()
-            else None,
-            hooks.EvalHook(cfg.train.eval_period, lambda: do_test(cfg, model)),
-            hooks.PeriodicWriter(
-                default_writers(cfg.train.output_dir, cfg.train.max_iter),
-                period=cfg.train.log_period,
+    
+    # Register WandB hook if enabled
+    hook_list = [
+        hooks.IterationTimer(),
+        hooks.LRScheduler(scheduler=instantiate(cfg.lr_multiplier)),
+        hooks.PeriodicCheckpointer(checkpointer, **cfg.train.checkpointer)
+        if comm.is_main_process()
+        else None,
+        hooks.EvalHook(cfg.train.eval_period, lambda: do_test(cfg, model)),
+        hooks.PeriodicWriter(
+            default_writers(cfg.train.output_dir, cfg.train.max_iter),
+            period=cfg.train.log_period,
+        )
+        if comm.is_main_process()
+        else None,
+    ]
+    
+    # Add WandB hook if enabled
+    if args and getattr(args, 'use_wandb', False):
+        try:
+            from detectron2.engine.hooks import WandbHook
+            wandb_hook = WandbHook(
+                project=getattr(args, 'wandb_project', 'detectron2'),
+                entity=getattr(args, 'wandb_entity', None),
+                name=getattr(args, 'wandb_run_name', None),
+                tags=getattr(args, 'wandb_tags', []),
+                enabled=True
             )
-            if comm.is_main_process()
-            else None,
-        ]
-    )
+            # Attach trainer to hook (needed for hook callbacks)
+            wandb_hook.trainer = trainer
+            hook_list.append(wandb_hook if comm.is_main_process() else None)
+            logger.info("WandB hook registered: project=%s, name=%s", 
+                       getattr(args, 'wandb_project', 'detectron2'),
+                       getattr(args, 'wandb_run_name', None))
+        except ImportError:
+            logger.warning("WandB not available. Install with: pip install wandb")
+        except Exception as e:
+            logger.warning(f"Failed to register WandB hook: {e}")
+    
+    trainer.register_hooks(hook_list)
 
     checkpointer.resume_or_load(cfg.train.init_checkpoint, resume=args.resume)
     if args.resume and checkpointer.has_checkpoint():
@@ -155,12 +234,39 @@ def main(args):
 
 
 if __name__ == "__main__":
-    args = default_argument_parser().parse_args()
-    launch(
-        main,
-        args.num_gpus,
-        num_machines=args.num_machines,
-        machine_rank=args.machine_rank,
-        dist_url=args.dist_url,
-        args=(args,),
-    )
+    parser = default_argument_parser()
+    # Note: WandB arguments are already defined in default_argument_parser()
+    # (--use-wandb, --wandb-project, --wandb-entity, --wandb-run-name, --wandb-tags)
+    args = parser.parse_args()
+    
+    # Check if already in distributed environment (from torch.distributed.run)
+    # When torch.distributed.run spawns processes, it sets RANK and WORLD_SIZE
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        # Already launched by torch.distributed.run, skip launch() to avoid double spawning
+        # Need to set CUDA device and create local process group
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        
+        # Set CUDA device for this process
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            logger.info("Set CUDA device to local_rank=%d", local_rank)
+        
+        # Create local process group (needed for Detectron2)
+        # For single node, num_gpus_per_machine equals world_size
+        num_gpus_per_machine = world_size
+        comm.create_local_process_group(num_gpus_per_machine)
+        
+        logger.info("Detected existing distributed environment (RANK=%s, WORLD_SIZE=%s, LOCAL_RANK=%s), "
+                   "skipping Detectron2 launch()", os.environ.get("RANK"), world_size, local_rank)
+        main(args)
+    else:
+        # Not in distributed environment, use Detectron2's launch to spawn processes
+        launch(
+            main,
+            args.num_gpus,
+            num_machines=args.num_machines,
+            machine_rank=args.machine_rank,
+            dist_url=args.dist_url,
+            args=(args,),
+        )

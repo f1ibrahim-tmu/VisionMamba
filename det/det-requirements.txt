@@ -199,3 +199,4 @@ wsproto==1.2.0
 yacs==0.1.8
 zipp==3.19.2
 zope.interface==6.4.post2
+mmdetection>=3.0.0

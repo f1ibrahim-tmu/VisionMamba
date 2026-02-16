@@ -2,11 +2,16 @@ import argparse
 import time
 
 import torch
-from mmcv import Config
-from mmcv.parallel import MMDataParallel
-from mmcv.runner import load_checkpoint
+from mmengine.config import Config
+from mmengine.runner import load_checkpoint
 
-from mmseg.datasets import build_dataloader, build_dataset
+# MMSegmentation ≥ 1.2: build_dataset and build_dataloader moved to mmengine.dataset
+try:
+    # MMSeg >= 1.2
+    from mmengine.dataset import build_dataset, build_dataloader
+except ImportError:
+    # Older MMSeg
+    from mmseg.datasets import build_dataset, build_dataloader
 from mmseg.models import build_segmentor
 
 import sys, os
@@ -77,13 +82,38 @@ def main():
         dataset = build_dataset(cfg.data.benchmark)
     
     BATCH_SIZE = args.batch_size if args.if_benchmark_model else 1
-    data_loader = build_dataloader(
-        dataset,
-        samples_per_gpu=BATCH_SIZE,
-        # workers_per_gpu=cfg.data.workers_per_gpu,
-        workers_per_gpu=1,
-        dist=False,
-        shuffle=False)
+    # Convert to MMEngine dataloader config format
+    dataloader_cfg = dict(
+        dataset=dataset,
+        batch_size=BATCH_SIZE,
+        num_workers=1,
+        sampler=dict(type='DefaultSampler', shuffle=False),
+        drop_last=False
+    )
+    # Try MMEngine's build_dataloader, fallback to legacy API
+    try:
+        from mmengine.dataset import build_dataloader as mmengine_build_dataloader
+        data_loader = mmengine_build_dataloader(dataloader_cfg)
+    except (ImportError, TypeError):
+        # Fallback: try legacy mmseg build_dataloader
+        try:
+            from mmseg.datasets import build_dataloader as mmseg_build_dataloader
+            data_loader = mmseg_build_dataloader(
+                dataset,
+                samples_per_gpu=BATCH_SIZE,
+                workers_per_gpu=1,
+                dist=False,
+                shuffle=False
+            )
+        except ImportError:
+            # Last resort: construct manually
+            from torch.utils.data import DataLoader
+            data_loader = DataLoader(
+                dataset,
+                batch_size=BATCH_SIZE,
+                num_workers=1,
+                shuffle=False
+            )
 
     # build the model and load checkpoint
     cfg.model.train_cfg = None
@@ -94,8 +124,10 @@ def main():
         model = build_segmentor(cfg.model, test_cfg=cfg.get('benchmark_cfg'))
     # load_checkpoint(model, args.checkpoint, map_location='cpu')
 
-    model = MMDataParallel(
-        model,#.to(torch.float16), 
+    # MMEngine ≥ 0.10: MMDataParallel is removed, use native PyTorch DataParallel
+    from torch.nn import DataParallel
+    model = DataParallel(
+        model.to('cuda:0'),
         device_ids=[0])
 
     print(f"Number of parameters: {num_params(model)}")

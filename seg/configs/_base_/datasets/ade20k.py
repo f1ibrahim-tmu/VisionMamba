@@ -1,79 +1,75 @@
-# dataset settings
+# dataset settings - MMSeg 1.x format
 dataset_type = 'ADE20KDataset'
 data_root = '/home/f7ibrahi/scratch' # HPC folder of datasets
 data_path = '/dataset/ade20k/ADEChallengeData2016'
 data_total = data_root + data_path
-img_norm_cfg = dict(
-    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 crop_size = (512, 512)
+
+# Data preprocessor handles normalization in MMSeg 1.x
+data_preprocessor = dict(
+    type='SegDataPreProcessor',
+    mean=[123.675, 116.28, 103.53],
+    std=[58.395, 57.12, 57.375],
+    bgr_to_rgb=True,
+    pad_val=0,
+    seg_pad_val=255,
+    size=crop_size)
+
+# MMSeg 1.x pipeline format
 train_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(type='LoadAnnotations', reduce_zero_label=True),
-    dict(type='Resize', img_scale=(2048, 512), ratio_range=(0.5, 2.0)),
+    dict(type='RandomResize', scale=(2048, 512), ratio_range=(0.5, 2.0), keep_ratio=True),
     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
     dict(type='RandomFlip', prob=0.5),
     dict(type='PhotoMetricDistortion'),
-    dict(type='Normalize', **img_norm_cfg),
-    dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
-    dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_semantic_seg']),
+    dict(type='PackSegInputs')
 ]
+
 test_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(
-        type='MultiScaleFlipAug',
-        img_scale=(2048, 512),
-        flip=False,
-        transforms=[
-            dict(type='Resize', keep_ratio=True),
-            dict(type='RandomFlip'),
-            dict(type='Normalize', **img_norm_cfg),
-            dict(type='ImageToTensor', keys=['img']),
-            dict(type='Collect', keys=['img']),
-        ])
+    dict(type='Resize', scale=(2048, 512), keep_ratio=True),
+    dict(type='LoadAnnotations', reduce_zero_label=True),
+    dict(type='PackSegInputs')
 ]
-# load image and output them in a same resolution
-# target_size = 640
-# benchmark_pipeline = [
-#     dict(type='LoadImageFromFile'),
-#     dict(type='Resize', img_scale=(target_size * 4, target_size), keep_ratio=True),
-#     # Crop
-#     dict(type='RandomCrop', crop_size=(target_size, target_size)),
-#     # RANDOM FLIP
-#     dict(type='RandomFlip', flip_ratio=0.5),
-#     # NORMALIZE
-#     dict(type='Normalize', **img_norm_cfg),
-#     # IMAGE TO TENSOR
-#     dict(type='ImageToTensor', keys=['img']),
-#     # COLLECT
-#     dict(type='Collect', keys=['img']),
-# ]
 
-data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=4,
-    train=dict(
+# MMSeg 1.x format: uses data_prefix instead of img_dir/ann_dir
+train_dataloader = dict(
+    batch_size=4,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='InfiniteSampler', shuffle=True),
+    dataset=dict(
         type=dataset_type,
         data_root=data_total,
-        img_dir='images/training',
-        ann_dir='annotations/training',
-        pipeline=train_pipeline),
-    val=dict(
-        type=dataset_type,
-        data_root=data_total,
-        img_dir='images/validation',
-        ann_dir='annotations/validation',
-        pipeline=test_pipeline),
-    test=dict(
-        type=dataset_type,
-        data_root=data_total,
-        img_dir='images/validation',
-        ann_dir='annotations/validation',
-        pipeline=test_pipeline),
-    # benchmark=dict(
-    #     type=dataset_type,
-    #     data_root=data_total,
-    #     img_dir='images/training',
-    #     ann_dir='annotations/training',
-    #     pipeline=benchmark_pipeline)        
+        data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
+        pipeline=train_pipeline)
 )
+
+val_dataloader = dict(
+    batch_size=1,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='DefaultSampler', shuffle=False),
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_total,
+        data_prefix=dict(img_path='images/validation', seg_map_path='annotations/validation'),
+        pipeline=test_pipeline)
+)
+
+test_dataloader = dict(
+    batch_size=1,
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='DefaultSampler', shuffle=False),
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_total,
+        data_prefix=dict(img_path='images/validation', seg_map_path='annotations/validation'),
+        pipeline=test_pipeline)
+)
+
+# Evaluator config
+val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])
+test_evaluator = val_evaluator
