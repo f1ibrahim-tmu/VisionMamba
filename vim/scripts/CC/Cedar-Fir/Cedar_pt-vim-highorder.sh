@@ -2,6 +2,15 @@
 
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
+# Usage: $0 <local_data>
+# Example (Fir): $0 /path/to/Fir/imagenet
+
+LOCAL_DATA="$1"
+if [ -z "$LOCAL_DATA" ]; then
+    echo "No dataset path found."
+    echo "Usage: $0 <local_data>"
+    exit 1
+fi
 
 # Generate unique port based on SLURM job ID (if available) or use process ID
 # Port range: 29500-29999 (500 ports available)
@@ -22,7 +31,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.002 \
-    --num_workers 2 \
-    --data-path /home/f7ibrahi/projects/def-wangcs/dataset/ImageNet/ILSVRC2012 \
+    --num_workers 4 \
+    --data-path "$LOCAL_DATA" \
     --output_dir ./output/classification_logs/vim_tiny_highorder \
     --resume ./output/classification_logs/vim_tiny_highorder/checkpoint.pth
