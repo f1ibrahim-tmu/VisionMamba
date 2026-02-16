@@ -25,9 +25,10 @@ DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 PRETRAIN_CKPT=/home/f7ibrahi/links/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_bilinear/best_checkpoint.pth
 OUTPUT_DIR=output/detection_logs/vim_tiny_rorqual_vimdet_bilinear
 # Calculate workers per GPU based on the total cores allocated by SLURM
-# Fir: 48 cores / 4 GPUs = 12 workers per task
-# Rorqual: 64 cores / 4 GPUs = 16 workers per task
+# Fir: 48 cores / 4 GPUs = 12 workers per task; Rorqual: 64 cores = 16 workers
+# With 32 CPUs, cap at 6 so DataLoader workers don't oversubscribe with OMP threads (Option 3B)
 WORKERS_PER_GPU=$((SLURM_CPUS_PER_TASK / 4))
+[ "${SLURM_CPUS_PER_TASK:-64}" -eq 32 ] && WORKERS_PER_GPU=6
 
 # 3. Resume Logic
 # The checkpointer looks for a 'last_checkpoint' file in the output directory
@@ -65,6 +66,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     dataloader.train.total_batch_size=64 \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
+    dataloader.train.prefetch_factor=2 \
+    dataloader.train.persistent_workers=True \
     model.backbone.net.discretization_method=bilinear \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
     optimizer.lr=1e-5 \
