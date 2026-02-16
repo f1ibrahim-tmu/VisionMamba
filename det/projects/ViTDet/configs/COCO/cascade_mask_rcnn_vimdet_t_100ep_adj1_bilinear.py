@@ -23,5 +23,6 @@ model.backbone.net.pretrained = "./output/classification_logs/vim_tiny_bilinear/
 model.backbone.net.discretization_method = "bilinear"  # Bilinear (Tustin) discretization
 # Tighter dt range for bilinear stability (aligned with seg)
 model.backbone.net.ssm_cfg = dict(dt_min=0.0005, dt_max=0.03, dt_scale=0.3)
+# Optimizer lr and weight_decay overridden in scripts (optimizer.lr=1e-5, optimizer.weight_decay=0.01) to match segmentation.
 
 optimizer.params.lr_factor_func = partial(get_vim_lr_decay_rate, num_layers=24, lr_decay_rate=0.837)

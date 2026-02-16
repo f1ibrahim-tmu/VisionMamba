@@ -66,7 +66,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     model.backbone.net.discretization_method=bilinear \
-    model.backbone.net.pretrained=${PRETRAIN_CKPT}
+    model.backbone.net.pretrained=${PRETRAIN_CKPT} \
+    optimizer.lr=1e-5 \
+    optimizer.weight_decay=0.01
     # --use-wandb \
     # --wandb-project visionmamba \
     # --wandb-run-name vim_tiny_vimdet_bilinear_cc-fir \

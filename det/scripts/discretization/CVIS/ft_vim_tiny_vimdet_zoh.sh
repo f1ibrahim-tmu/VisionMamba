@@ -25,4 +25,6 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=zoh \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
+    optimizer.lr=1e-5 \
+    optimizer.weight_decay=0.01 \
     ${CHECKPOINT_ARG}
