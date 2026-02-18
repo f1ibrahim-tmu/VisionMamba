@@ -27,11 +27,11 @@ echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
     ./vim/main.py \
     --model vim_tiny_patch16_224_bimambav2_rk4 \
-    --batch-size 256 \
+    --batch-size 128 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
     --lr 0.002 \
-    --num_workers 4 \
+    --num_workers 2 \
     --data-path "$LOCAL_DATA" \
     --output_dir ./output/classification_logs/vim_tiny_rk4 \
     --resume ./output/classification_logs/vim_tiny_rk4/checkpoint.pth

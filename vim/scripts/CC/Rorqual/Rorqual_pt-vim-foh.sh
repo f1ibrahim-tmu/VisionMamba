@@ -35,8 +35,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     --batch-size 128 \
     --drop-path 0.0 \
     --weight-decay 0.05 \
-    --lr 0.001 \
-    --num_workers 4 \
+    --lr 0.002 \
+    --num_workers 2 \
     --input-size 32 \
     --data-set CIFAR \
     --data-path "$LOCAL_DATA" \

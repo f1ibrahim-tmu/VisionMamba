@@ -1,0 +1,3 @@
+method,work_dir,bbox_AP,segm_AP,AP50,AP75,iteration
+Bilinear (Tustin),/Users/fadyibrahim/Projects/tmu_f7ibrahi/Scripts_Outputs/HPC Testing - SegDet Scripts/rorqual_detection_logs/vim_tiny_rorqual_vimdet_bilinear,0.00864915402730652,0.004768992612250689,0.024182221355297583,0.006613374335848624,34999
+Polynomial Interpolation,/Users/fadyibrahim/Projects/tmu_f7ibrahi/Scripts_Outputs/HPC Testing - SegDet Scripts/rorqual_detection_logs/vim_tiny_rorqual_vimdet_poly,0.06590799696526178,0.035081074485164426,0.14416262701161545,0.03883212859022338,34999

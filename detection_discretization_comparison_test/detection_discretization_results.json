@@ -1,0 +1,20 @@
+[
+  {
+    "method": "Bilinear (Tustin)",
+    "work_dir": "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Scripts_Outputs/HPC Testing - SegDet Scripts/rorqual_detection_logs/vim_tiny_rorqual_vimdet_bilinear",
+    "bbox_AP": 0.00864915402730652,
+    "segm_AP": 0.004768992612250689,
+    "AP50": 0.024182221355297583,
+    "AP75": 0.006613374335848624,
+    "iteration": 34999
+  },
+  {
+    "method": "Polynomial Interpolation",
+    "work_dir": "/Users/fadyibrahim/Projects/tmu_f7ibrahi/Scripts_Outputs/HPC Testing - SegDet Scripts/rorqual_detection_logs/vim_tiny_rorqual_vimdet_poly",
+    "bbox_AP": 0.06590799696526178,
+    "segm_AP": 0.035081074485164426,
+    "AP50": 0.14416262701161545,
+    "AP75": 0.03883212859022338,
+    "iteration": 34999
+  }
+]
