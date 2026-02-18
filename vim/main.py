@@ -165,8 +165,8 @@ def get_args_parser():
     parser.add_argument('--attn-only', action='store_true') 
     
     # Dataset parameters
-    parser.add_argument('--data-path', default='/datasets01/imagenet_full_size/061417/', type=str,
-                        help='dataset path')
+    parser.add_argument('--data-path', default='', type=str,
+                        help='dataset path (required for CIFAR, IMNET, INAT, INAT19)')
     parser.add_argument('--data-set', default='IMNET', choices=['CIFAR', 'IMNET', 'INAT', 'INAT19'],
                         type=str, help='Image Net dataset path')
     parser.add_argument('--inat-category', default='name',
@@ -241,6 +241,9 @@ def main(args):
 
     if args.distillation_type != 'none' and args.finetune and not args.eval:
         raise NotImplementedError("Finetuning with distillation not yet supported")
+
+    if args.data_set in ('CIFAR', 'IMNET', 'INAT', 'INAT19') and (not args.data_path or not args.data_path.strip()):
+        raise ValueError("no dataset path found")
 
     device = torch.device(args.device)
 
