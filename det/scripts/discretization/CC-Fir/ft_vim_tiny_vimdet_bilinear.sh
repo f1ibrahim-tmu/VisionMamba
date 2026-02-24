@@ -24,11 +24,13 @@ DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_bilinear
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_bilinear/best_checkpoint.pth
 OUTPUT_DIR=output/detection_logs/vim_tiny_fir_vimdet_bilinear
-# Calculate workers per GPU based on the total cores allocated by SLURM
-# Fir: 48 cores / 4 GPUs = 12 workers per task; Rorqual: 64 cores = 16 workers
-# With 32 CPUs, cap at 6 so DataLoader workers don't oversubscribe with OMP threads (Option 3B)
-WORKERS_PER_GPU=$((SLURM_CPUS_PER_TASK / 4))
-[ "${SLURM_CPUS_PER_TASK:-64}" -eq 32 ] && WORKERS_PER_GPU=6
+# Calculate workers per GPU based on the 12-core optimization (Option 3C)
+# Reserves 4 cores for main training processes; allocates 2 workers per GPU
+# Formula: (12 total cores - 4 main processes) / 4 GPUs = 2 workers per GPU
+WORKERS_PER_GPU=$(((SLURM_CPUS_PER_TASK - 4) / 4))
+# Safety check: Ensure we don't drop below 1 worker per GPU
+[ "$WORKERS_PER_GPU" -lt 1 ] && WORKERS_PER_GPU=1
+echo "Allocated $SLURM_CPUS_PER_TASK CPUs. Setting WORKERS_PER_GPU to $WORKERS_PER_GPU"
 
 # 3. Resume Logic
 # The checkpointer looks for a 'last_checkpoint' file in the output directory
