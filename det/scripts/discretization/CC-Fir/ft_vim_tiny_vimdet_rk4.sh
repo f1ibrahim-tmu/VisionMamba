@@ -72,8 +72,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     dataloader.train.persistent_workers=True \
     model.backbone.net.discretization_method=rk4 \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
-    optimizer.lr=1e-5 \
-    optimizer.weight_decay=0.01
+    optimizer.lr=1e-4 \
+    optimizer.weight_decay=0.1
     # --use-wandb \
     # --wandb-project visionmamba \
     # --wandb-run-name vim_tiny_vimdet_rk4_cc-fir \
