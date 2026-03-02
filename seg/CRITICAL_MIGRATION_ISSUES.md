@@ -119,6 +119,34 @@ class ThroughputHook(Hook):
 
 ---
 
+#### 5. Learning rate / optimizer overrides from CLI (CRITICAL) ✅ FIXED
+
+**Location:** All training scripts passing `--options optimizer.lr=...` or `optimizer.weight_decay=...`
+
+**Issue:** In MMEngine, the Runner builds the optimizer from **`cfg.optim_wrapper.optimizer`**, not from a top-level `cfg.optimizer`. Passing `optimizer.lr=4e-4` in `--options` only sets `cfg.optimizer.lr`; that key is never read, so the config file’s `optim_wrapper.optimizer.lr` (e.g. `1e-5`) is used. Training then runs with a “ghost” LR (e.g. ~40× smaller than intended), and loss/mIoU can appear frozen.
+
+**Fix Applied:**
+
+- All segmentation training scripts now use **`optim_wrapper.optimizer.lr`** and **`optim_wrapper.optimizer.weight_decay`** in `--options`.
+- For paramwise options (e.g. layer decay), use **`optim_wrapper.paramwise_cfg.layer_decay_rate`** instead of `optimizer.paramwise_cfg.layer_decay_rate`.
+- Discretization configs (ZOH, FOH, RK4, Poly, Highorder, Bilinear) default to `lr=4e-4` to match script intent.
+
+**Correct override pattern:**
+
+```bash
+# Wrong (ignored by MMEngine Runner)
+--options optimizer.lr=4e-4 optimizer.weight_decay=0.01
+
+# Correct
+--options optim_wrapper.optimizer.lr=4e-4 optim_wrapper.optimizer.weight_decay=0.01
+```
+
+**Note:** Detection uses Detectron2 LazyConfig, which builds from `cfg.optimizer`; there `optimizer.lr=...` is correct and should not be changed.
+
+**Status:** ✅ FIXED - All seg scripts and configs updated
+
+---
+
 ## Recommendations
 
 ### Immediate Actions Required:

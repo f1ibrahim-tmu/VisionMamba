@@ -42,8 +42,8 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
              model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=foh \
-             optimizer.lr=1e-5 \
-             optimizer.weight_decay=0.01 \
+             optim_wrapper.optimizer.lr=1e-5 \
+             optim_wrapper.optimizer.weight_decay=0.01 \
              train_cfg.max_iters=200000 \
     --work-dir ${WORK_DIR} \
     ${RESUME_ARG}
