@@ -65,15 +65,15 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     ${RESUME_FLAG} \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
-    dataloader.train.total_batch_size=48 \
+    dataloader.train.total_batch_size=32 \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     dataloader.train.prefetch_factor=2 \
     dataloader.train.persistent_workers=True \
     model.backbone.net.discretization_method=foh \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
-    optimizer.lr=1e-4 \
-    optimizer.weight_decay=0.1
+    optimizer.lr=5e-5 \
+    optimizer.weight_decay=0.05
     # --use-wandb \
     # --wandb-project visionmamba \
     # --wandb-run-name vim_tiny_vimdet_foh_cc-fir \

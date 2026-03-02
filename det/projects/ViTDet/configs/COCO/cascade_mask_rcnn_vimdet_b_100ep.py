@@ -17,6 +17,9 @@ from .mask_rcnn_vimdet_b_100ep import (
     get_vim_lr_decay_rate,
 )
 
+# Checkpoint every 20k iters, keep last 5 (all *_adj1_* discretization configs inherit this)
+train.checkpointer = dict(period=20000, max_to_keep=5)
+
 # arguments that don't exist for Cascade R-CNN
 [model.roi_heads.pop(k) for k in ["box_head", "box_predictor", "proposal_matcher"]]
 
