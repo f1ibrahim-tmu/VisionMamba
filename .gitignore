@@ -18,6 +18,7 @@ causal-conv1d/
 backup-setup-guide/
 work_dirs/
 output/
+documentation/
 __pycache__/
 wandb/
 *.wandb
