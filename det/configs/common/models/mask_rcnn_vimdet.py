@@ -32,6 +32,7 @@ model.backbone = L(SimpleFeaturePyramid)(
         if_rope_residual=True,
         pt_hw_seq_len=14,
         if_cls_token=False,
+        init_backward_from_forward=True,
     ),
     in_feature="${.net.out_feature}",
     out_channels=256,

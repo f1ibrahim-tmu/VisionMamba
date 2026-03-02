@@ -1,5 +1,7 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba segmentation on ADE20K
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_zoh.py
 PRETRAIN_CKPT=/data/fady/projects/VisionMamba/output/vim_tiny_zoh/best_checkpoint.pth
@@ -38,6 +40,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
     ${SEG_CONFIG} \
     --seed 0 --work-dir work_dirs/vimseg-t-zoh --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
+             model.backbone.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
              train_dataloader.batch_size=32 \
              model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \

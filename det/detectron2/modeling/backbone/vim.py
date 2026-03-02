@@ -50,6 +50,7 @@ class VisionMambaDet(VisionMamba, Backbone):
         if_fpn=True,
         last_layer_process="none",
         out_feature="last_feat",
+        init_backward_from_forward=True,
         **kwargs,
     ):
 
@@ -57,6 +58,7 @@ class VisionMambaDet(VisionMamba, Backbone):
         ft_seq_len = img_size // patch_size
         kwargs['ft_seq_len'] = ft_seq_len
 
+        self.init_backward_from_forward = init_backward_from_forward
         super().__init__(img_size, patch_size, depth=depth, embed_dim=embed_dim, channels=in_chans, num_classes=num_classes, **kwargs)
 
         self.use_checkpoint = use_checkpoint
@@ -96,6 +98,46 @@ class VisionMambaDet(VisionMamba, Backbone):
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
 
+        def _init_missing_bidirectional_from_forward(missing_keys, log):
+            """Initialize missing backward (bidirectional) Mamba params from forward params."""
+            if not missing_keys:
+                return
+            model_sd = self.state_dict()
+            forward_from_backward = {
+                ".mixer.D_b": ".mixer.D",
+                ".mixer.dt_proj_b.": ".mixer.dt_proj.",
+                ".mixer.A_b_log": ".mixer.A_log",
+                ".mixer.x_proj_b.": ".mixer.x_proj.",
+                ".mixer.conv1d_b.": ".mixer.conv1d.",
+            }
+            n_copied = 0
+            with torch.no_grad():
+                for key in missing_keys:
+                    if ".mixer." not in key:
+                        continue
+                    forward_key = None
+                    for suff, repl in forward_from_backward.items():
+                        if suff in key:
+                            forward_key = key.replace(suff, repl)
+                            break
+                    if forward_key is None or forward_key not in model_sd:
+                        continue
+                    if key not in model_sd:
+                        continue
+                    src = model_sd[forward_key]
+                    dst = model_sd[key]
+                    if src.shape != dst.shape:
+                        log.warning(
+                            f"Skipping copy {forward_key} -> {key}: shape mismatch "
+                            f"{src.shape} vs {dst.shape}"
+                        )
+                        continue
+                    dst.copy_(src)
+                    n_copied += 1
+                    log.info(f"Initialized {key} from pretrained {forward_key} (unidirectional ckpt)")
+            if n_copied > 0:
+                log.info(f"Initialized {n_copied} missing bidirectional Mamba params from forward.")
+
         if isinstance(pretrained, str) and pretrained:
             # Check if path is a placeholder or doesn't exist
             import os
@@ -128,10 +170,17 @@ class VisionMambaDet(VisionMamba, Backbone):
                 state_dict_model.pop("patch_embed.proj.bias")
             interpolate_pos_embed(self, state_dict_model)
 
-            res = self.load_state_dict(state_dict_model, strict=False) 
+            res = self.load_state_dict(state_dict_model, strict=False)
             logger.info(res)
             print(res)
-            
+            # If checkpoint was unidirectional but model is bidirectional, optionally copy forward -> backward.
+            if self.init_backward_from_forward:
+                _init_missing_bidirectional_from_forward(res.missing_keys, logger)
+            elif res.missing_keys:
+                logger.warning(
+                    f"init_backward_from_forward=False: {len(res.missing_keys)} missing keys (e.g. backward Mamba params) left at random init."
+                )
+
             # Reinitialize dt_proj for detection task compatibility
             # Classification models have large dt_proj values optimized for short sequences (224x224)
             # Detection needs smaller dt_proj for longer sequences (1024x1024) to prevent numerical instability

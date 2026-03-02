@@ -17,6 +17,8 @@ fi
 
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
 SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_zoh.py
 PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
@@ -66,6 +68,7 @@ CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_
     ${SEG_CONFIG} \
     --seed 0 \
     --options model.backbone.pretrained="${PRETRAIN_CKPT}" \
+             model.backbone.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
              model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \

@@ -1,5 +1,7 @@
 #!/bin/bash
 # Zero Order Hold (ZOH) discretization for Vision Mamba detection on MS-COCO
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
@@ -24,6 +26,7 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
     dataloader.train.num_workers=16 \
     dataloader.test.num_workers=8 \
     model.backbone.net.discretization_method=zoh \
+    model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
     optimizer.lr=1e-5 \
     optimizer.weight_decay=0.01 \

@@ -20,6 +20,9 @@ fi
 export DETECTRON2_DATASETS
 
 # 2. Training Variables
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
+
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_foh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_foh/best_checkpoint.pth
@@ -71,6 +74,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     dataloader.train.prefetch_factor=2 \
     dataloader.train.persistent_workers=True \
     model.backbone.net.discretization_method=foh \
+    model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
     optimizer.lr=5e-5 \
     optimizer.weight_decay=0.05

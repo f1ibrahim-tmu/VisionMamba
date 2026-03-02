@@ -18,6 +18,9 @@ fi
 
 export DETECTRON2_DATASETS
 
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
+
 # Generate unique port based on SLURM job ID (if available) or use process ID
 # Port range: 29500-29999 (500 ports available)
 if [ -n "$SLURM_JOB_ID" ]; then
@@ -41,6 +44,7 @@ CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_
     dataloader.train.num_workers=4 \
     dataloader.test.num_workers=2 \
     model.backbone.net.discretization_method=zoh \
+    model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
     optimizer.lr=1e-4 \
     optimizer.weight_decay=0.1
     # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \
