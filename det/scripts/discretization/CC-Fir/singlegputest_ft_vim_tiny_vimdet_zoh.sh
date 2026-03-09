@@ -18,6 +18,7 @@ fi
 
 export DETECTRON2_DATASETS
 
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 # Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
 INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
@@ -39,7 +40,7 @@ DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
 CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_node=1 --master_port $MASTER_PORT \
     det/tools/lazyconfig_train_net.py \
     --config-file ${DET_CONFIG} \
-    train.output_dir=output/detection_logs/vim_tiny_vimdet_zoh \
+    train.output_dir=${OUTPUT_ROOT}/detection_logs/vim_tiny_vimdet_zoh \
     train.init_checkpoint="" \
     dataloader.train.num_workers=4 \
     dataloader.test.num_workers=2 \

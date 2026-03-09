@@ -14,6 +14,7 @@ Example:
 
 import argparse
 import json
+import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
@@ -45,12 +46,14 @@ LAYOUT_SUBDIRS = {
 
 
 def get_args_parser():
+    _output_root = os.environ.get("OUTPUT_ROOT", "")
+    _work_dirs_default = os.path.join(_output_root, "detection_logs") if _output_root else "output/detection_logs"
     parser = argparse.ArgumentParser('Compare Vision Mamba Detection Discretization Methods', add_help=False)
     parser.add_argument(
         '--work-dirs',
-        default='output/detection_logs',
+        default=_work_dirs_default,
         type=str,
-        help='Base path to detection run dirs (e.g. output/detection_logs or /path/to/rorqual_detection_logs)',
+        help='Base path to detection run dirs (e.g. output/detection_logs or $OUTPUT_ROOT/detection_logs)',
     )
     parser.add_argument(
         '--layout',

@@ -104,7 +104,8 @@ def main():
     if args.work_dir is not None:
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
-        cfg.work_dir = osp.join('./work_dirs',
+        output_root = os.environ.get('OUTPUT_ROOT', '.')
+        cfg.work_dir = osp.join(output_root, 'segmentation_logs',
                                 osp.splitext(osp.basename(args.config))[0])
     
     # Handle load_from and resume_from

@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Usage: $0 <local_data> [seed]
 # Example (Rorqual): $0 /path/to/Rorqual/cifar100 0
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 LOCAL_DATA="$1"
 if [ -z "$LOCAL_DATA" ]; then
     echo "No dataset path found."
@@ -41,5 +42,5 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     --data-set CIFAR \
     --data-path "$LOCAL_DATA" \
     --seed $SEED \
-    --output_dir ./output/classification_logs/vim_tiny_zoh_seed${SEED} \
-    --resume ./output/classification_logs/vim_tiny_zoh_seed${SEED}/checkpoint.pth
+    --output_dir "${OUTPUT_ROOT}/classification_logs/vim_tiny_zoh_seed${SEED}" \
+    --resume "${OUTPUT_ROOT}/classification_logs/vim_tiny_zoh_seed${SEED}/checkpoint.pth"

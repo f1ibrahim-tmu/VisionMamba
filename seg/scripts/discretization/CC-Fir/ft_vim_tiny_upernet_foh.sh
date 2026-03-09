@@ -17,17 +17,18 @@ else
 fi
 
 # 2. Training Variables
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
 INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
 SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_foh.py
-PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_foh/best_checkpoint.pth
+PRETRAIN_CKPT="${OUTPUT_ROOT}/classification_logs/vim_tiny_foh/best_checkpoint.pth"
 
 # 3. Resume Logic
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
-WORK_DIR=./output/segmentation_logs/vim_tiny_fir_vimseg_upernet_foh
+WORK_DIR="${OUTPUT_ROOT}/segmentation_logs/vim_tiny_fir_vimseg_upernet_foh"
 RESUME_ARG=""
 CHECKPOINT_PATH=""
 

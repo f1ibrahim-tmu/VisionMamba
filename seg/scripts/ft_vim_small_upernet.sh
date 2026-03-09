@@ -3,6 +3,7 @@
 source /mnt/bn/lianghuidata/miniconda/bin/activate /mnt/bn/lianghuidata/miniconda/envs/vim-seg
 cd /mnt/bn/lianghuidata/Vim/seg
 
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 # Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
 INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
@@ -12,5 +13,5 @@ PRETRAIN_CKPT=/mnt/bn/lianghuidata/Vim/pretrained_ckpts/pretrained-vim-s.pth
 python3 -m torch.distributed.launch --nproc_per_node=4 --nnodes=${WORLD_SIZE} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=45935 \
 --use_env train.py --launcher pytorch \
     ${SEG_CONFIG} \
-    --seed 0 --work-dir work_dirs/vimseg-s --deterministic \
+    --seed 0 --work-dir "${OUTPUT_ROOT}/segmentation_logs/vimseg-s" --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} model.backbone.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} model.backbone.if_bimamba=True model.backbone.bimamba_type=v2 optim_wrapper.optimizer.lr=1e-5 optim_wrapper.optimizer.weight_decay=0.01 train_cfg.max_iters=200000 model.backbone.use_residual_as_feature=True model.backbone.last_layer_process=add optim_wrapper.paramwise_cfg.layer_decay_rate=0.95

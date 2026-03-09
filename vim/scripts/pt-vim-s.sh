@@ -2,6 +2,7 @@
 
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --master_port=0 ./vim/main.py \
     --model vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
@@ -11,4 +12,4 @@ CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --nproc_per_node=2 --ma
     --lr 1e-3 \
     --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
-    --output_dir ./output/vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2
+    --output_dir "${OUTPUT_ROOT}/classification_logs/vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2"
