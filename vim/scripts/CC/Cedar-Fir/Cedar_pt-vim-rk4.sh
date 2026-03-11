@@ -4,6 +4,7 @@
 # cd ./projects/VisionMamba/vim;
 # Usage: $0 <local_data>
 # Example (Fir): $0 /path/to/Fir/imagenet
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 LOCAL_DATA="$1"
 if [ -z "$LOCAL_DATA" ]; then
@@ -33,5 +34,5 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     --lr 0.002 \
     --num_workers 4 \
     --data-path "$LOCAL_DATA" \
-    --output_dir ./output/classification_logs/vim_tiny_rk4 \
-    --resume ./output/classification_logs/vim_tiny_rk4/checkpoint.pth
+    --output_dir "${OUTPUT_ROOT}/classification_logs/vim_tiny_rk4" \
+    --resume "${OUTPUT_ROOT}/classification_logs/vim_tiny_rk4/checkpoint.pth"

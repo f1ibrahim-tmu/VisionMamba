@@ -15,15 +15,18 @@ else
     echo "Using dataset path: ${ADE20K_DATASET_PATH}"
 fi
 
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 # Required for deterministic mode with CuBLAS
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
-SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_zoh.py
-PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_zoh/best_checkpoint.pth
+SEG_CONFIG=./seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_zoh.py
+PRETRAIN_CKPT="${OUTPUT_ROOT}/classification_logs/vim_tiny_zoh/best_checkpoint.pth"
 
 # Check if we should resume training
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
-WORK_DIR=output/segmentation_logs/vim_tiny_vimseg_upernet_zoh
+WORK_DIR="${OUTPUT_ROOT}/segmentation_logs/vim_tiny_vimseg_upernet_zoh"
 RESUME_ARG=""
 CHECKPOINT_PATH=""
 
@@ -61,20 +64,20 @@ export MASTER_PORT
 
 echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
 
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --nproc_per_node=4 --nnodes=${WORLD_SIZE:-1} --node_rank=${RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=10297 \
-
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_node=1 --master_port $MASTER_PORT \
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_node=1 --master_port=$MASTER_PORT \
     seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
     --seed 0 \
     --options model.backbone.pretrained="${PRETRAIN_CKPT}" \
-             model.backbone.if_bimamba=False \
+             model.backbone.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
+             model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=zoh \
-             optimizer.lr=0.001 \
-             optimizer.weight_decay=0.05 \
+             optim_wrapper.optimizer.lr=4e-4 \
+             optim_wrapper.optimizer.weight_decay=0.01 \
              train_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              val_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
              test_dataloader.dataset.data_root="${ADE20K_DATASET_PATH}" \
+             train_cfg.max_iters=200000 \
     --work-dir ${WORK_DIR} \
     ${RESUME_ARG}

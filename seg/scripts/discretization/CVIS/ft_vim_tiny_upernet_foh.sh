@@ -1,9 +1,12 @@
 #!/bin/bash
 # First Order Hold (FOH) discretization for Vision Mamba segmentation on ADE20K
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
-SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_60k_foh.py
-PRETRAIN_CKPT=/data/fady/projects/VisionMamba/output/vim_tiny_foh/best_checkpoint.pth
-WORK_DIR=output/segmentation_logs/vim_tiny_vimseg_upernet_foh
+SEG_CONFIG=seg/configs/vim/upernet/upernet_vim_tiny_24_512_slide_200k_foh.py
+PRETRAIN_CKPT="${OUTPUT_ROOT}/classification_logs/vim_tiny_foh/best_checkpoint.pth"
+WORK_DIR="${OUTPUT_ROOT}/segmentation_logs/vim_tiny_vimseg_upernet_foh"
 
 # Check if we should resume training
 # MMEngine saves checkpoints as latest.pth, iter_*.pth, or custom names
@@ -36,14 +39,16 @@ OMP_NUM_THREADS=16 CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.run --st
     --master_port=0 \
     ./seg/train.py --launcher pytorch \
     ${SEG_CONFIG} \
-    --seed 0 --work-dir work_dirs/vimseg-t-foh--deterministic \
+    --seed 0 --work-dir ${WORK_DIR} --deterministic \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
+             model.backbone.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
              train_dataloader.batch_size=32 \
-             model.backbone.if_bimamba=False \
+             model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=foh \
-             optimizer.lr=0.001 \
-             optimizer.weight_decay=0.05 \
+             optim_wrapper.optimizer.lr=1e-5 \
+             optim_wrapper.optimizer.weight_decay=0.01 \
+             train_cfg.max_iters=200000 \
     --work-dir ${WORK_DIR} \
     ${RESUME_ARG}
 

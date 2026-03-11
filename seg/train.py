@@ -1,22 +1,41 @@
+"""
+MMSeg 1.x Training Script
+
+Uses Runner.from_cfg() to handle all model, optimizer, dataloader,
+and training loop building automatically.
+"""
+
 import argparse
-import copy
 import os
 import os.path as osp
 import time
 
-import mmcv
+import mmengine
 import torch
-from mmcv.runner import init_dist
-from mmcv.utils import Config, DictAction, get_git_hash
+from mmengine.dist import init_dist
+from mmengine.config import Config, DictAction
+from mmengine.utils import get_git_hash
+from mmengine.logging import MMLogger
 
 from mmseg import __version__
-from mmseg.apis import set_random_seed
-from mmcv_custom import train_segmentor
-from mmseg.datasets import build_dataset
-from mmseg.models import build_segmentor
-from mmseg.utils import collect_env, get_root_logger
+try:
+    from mmengine.runner import set_random_seed
+except ImportError:
+    from mmcv_custom.train_api import set_random_seed
 
+from mmcv_custom import train_segmentor
+# Import custom optimizer constructor to register it
+from mmcv_custom import VimLayerDecayOptimizerConstructor
+
+# collect_env moved to mmengine.utils in MMSeg 1.x
+try:
+    from mmengine.utils import collect_env
+except ImportError:
+    from mmseg.utils import collect_env
+
+# Import backbone to register it with MMSeg registry
 from backbone import vim
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
@@ -58,7 +77,7 @@ def parse_args():
     
     # Weights & Biases arguments
     parser.add_argument('--use-wandb', action='store_true', help='Use Weights & Biases for logging')
-    parser.add_argument('--wandb-project', default='mmsegmentation', type=str, help='W&B project name')
+    parser.add_argument('--wandb-project', default='visionmamba', type=str, help='W&B project name')
     parser.add_argument('--wandb-entity', default=None, type=str, help='W&B entity/team name')
     parser.add_argument('--wandb-run-name', default=None, type=str, help='W&B run name')
     parser.add_argument('--wandb-tags', nargs='+', default=[], help='Tags for W&B run')
@@ -76,22 +95,26 @@ def main():
     cfg = Config.fromfile(args.config)
     if args.options is not None:
         cfg.merge_from_dict(args.options)
+    
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
 
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
-        # update configs according to CLI args if args.work_dir is not None
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
-        # use config filename as default work_dir if cfg.work_dir is None
-        cfg.work_dir = osp.join('./work_dirs',
+        output_root = os.environ.get('OUTPUT_ROOT', '.')
+        cfg.work_dir = osp.join(output_root, 'segmentation_logs',
                                 osp.splitext(osp.basename(args.config))[0])
+    
+    # Handle load_from and resume_from
     if args.load_from is not None:
         cfg.load_from = args.load_from
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
+    
+    # Set gpu_ids for compatibility
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids
     else:
@@ -100,28 +123,35 @@ def main():
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
         distributed = False
+        cfg.launcher = 'none'
     else:
         distributed = True
-        init_dist(args.launcher, **cfg.dist_params)
+        init_dist(args.launcher, **cfg.get('dist_params', {}))
+        cfg.launcher = args.launcher
 
     # create work_dir
-    mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    mmengine.utils.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    
     # dump config
     cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
+    
     # init the logger before other steps
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
-    logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
+    logger = MMLogger.get_instance(
+        name='mmseg',
+        log_file=log_file,
+        log_level=cfg.get('log_level', 'INFO')
+    )
 
-    # init the meta dict to record some important information such as
-    # environment info and seed, which will be logged
+    # init the meta dict to record some important information
     meta = dict()
+    
     # log env info
     env_info_dict = collect_env()
     env_info = '\n'.join([f'{k}: {v}' for k, v in env_info_dict.items()])
     dash_line = '-' * 60 + '\n'
-    logger.info('Environment info:\n' + dash_line + env_info + '\n' +
-                dash_line)
+    logger.info('Environment info:\n' + dash_line + env_info + '\n' + dash_line)
     meta['env_info'] = env_info
 
     # log some basic info
@@ -130,35 +160,27 @@ def main():
 
     # set random seeds
     if args.seed is not None:
-        logger.info(f'Set random seed to {args.seed}, deterministic: '
-                    f'{args.deterministic}')
+        logger.info(f'Set random seed to {args.seed}, deterministic: {args.deterministic}')
         set_random_seed(args.seed, deterministic=args.deterministic)
     cfg.seed = args.seed
     meta['seed'] = args.seed
     meta['exp_name'] = osp.basename(args.config)
 
-    model = build_segmentor(
-        cfg.model,
-        train_cfg=cfg.get('train_cfg'),
-        test_cfg=cfg.get('test_cfg'))
-
-    logger.info(model)
-
-    datasets = [build_dataset(cfg.data.train)]
-    if len(cfg.workflow) == 2:
-        val_dataset = copy.deepcopy(cfg.data.val)
-        val_dataset.pipeline = cfg.data.train.pipeline
-        datasets.append(build_dataset(val_dataset))
-    if cfg.checkpoint_config is not None:
-        # save mmseg version, config file content and class names in
-        # checkpoints as meta data
-        cfg.checkpoint_config.meta = dict(
-            mmseg_version=f'{__version__}+{get_git_hash()[:7]}',
-            config=cfg.pretty_text,
-            CLASSES=datasets[0].CLASSES,
-            PALETTE=datasets[0].PALETTE)
-    # add an attribute for visualization convenience
-    model.CLASSES = datasets[0].CLASSES
+    # Ensure default_scope is set for registry
+    if not hasattr(cfg, 'default_scope'):
+        cfg.default_scope = 'mmseg'
+    
+    # Ensure env_cfg is set for Runner
+    if not hasattr(cfg, 'env_cfg'):
+        cfg.env_cfg = dict(
+            cudnn_benchmark=cfg.get('cudnn_benchmark', False),
+            mp_cfg=dict(mp_start_method='fork', opencv_num_threads=0),
+            dist_cfg=dict(backend='nccl')
+        )
+    
+    # Ensure randomness config
+    if not hasattr(cfg, 'randomness'):
+        cfg.randomness = dict(seed=args.seed, deterministic=args.deterministic)
     
     # Add W&B config to cfg
     if args.use_wandb:
@@ -168,14 +190,17 @@ def main():
         cfg.wandb_run_name = args.wandb_run_name
         cfg.wandb_tags = args.wandb_tags
     
+    # Run training using Runner.from_cfg()
+    # This handles everything: model, optimizer, dataloaders, training loop
+    validate_flag = not args.no_validate
+    
     train_segmentor(
-        model,
-        datasets,
         cfg,
         distributed=distributed,
-        validate=(not args.no_validate),
+        validate=validate_flag,
         timestamp=timestamp,
-        meta=meta)
+        meta=meta
+    )
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 # WARNING: RK4 discretization has known SIGBUS issues with distributed training on some systems
 # SIGBUS errors during distributed barrier indicate system-level memory alignment issues
@@ -35,5 +36,5 @@ OMP_NUM_THREADS=2 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --lr 0.002 \
     --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
-    --output_dir ./output/vim_tiny_rk4 \
-    --resume ./output/vim_tiny_rk4/checkpoint.pth
+    --output_dir "${OUTPUT_ROOT}/classification_logs/vim_tiny_rk4" \
+    --resume "${OUTPUT_ROOT}/classification_logs/vim_tiny_rk4/checkpoint.pth"

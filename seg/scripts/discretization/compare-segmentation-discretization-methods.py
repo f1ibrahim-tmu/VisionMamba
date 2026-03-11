@@ -19,8 +19,10 @@ import json
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 def get_args_parser():
+    _output_root = os.environ.get('OUTPUT_ROOT', '')
+    _work_dirs_default = os.path.join(_output_root, 'segmentation_logs') if _output_root else 'work_dirs'
     parser = argparse.ArgumentParser('Compare Vision Mamba Segmentation Discretization Methods', add_help=False)
-    parser.add_argument('--work-dirs', default='work_dirs', type=str, help='Path to work directories')
+    parser.add_argument('--work-dirs', default=_work_dirs_default, type=str, help='Path to work directories')
     parser.add_argument('--output', default='./segmentation_discretization_comparison', type=str, help='Output directory for results')
     parser.add_argument('--config-dir', default='configs/vim/upernet', type=str, help='Path to config files')
     return parser

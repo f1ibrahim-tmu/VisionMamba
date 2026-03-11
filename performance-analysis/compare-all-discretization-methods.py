@@ -14,10 +14,14 @@ from pathlib import Path
 import json
 
 def get_args_parser():
+    _output_root = os.environ.get("OUTPUT_ROOT", "")
+    _vim_default = os.path.join(_output_root, "classification_logs") if _output_root else "vim/output"
+    _seg_default = os.path.join(_output_root, "segmentation_logs") if _output_root else "seg/work_dirs"
+    _det_default = os.path.join(_output_root, "detection_logs") if _output_root else "det/work_dirs"
     parser = argparse.ArgumentParser('Compare All Vision Mamba Discretization Methods', add_help=False)
-    parser.add_argument('--vim-output', default='vim/output', type=str, help='Path to VIM classification output')
-    parser.add_argument('--seg-work-dirs', default='seg/work_dirs', type=str, help='Path to segmentation work directories')
-    parser.add_argument('--det-work-dirs', default='det/work_dirs', type=str, help='Path to detection work directories')
+    parser.add_argument('--vim-output', default=_vim_default, type=str, help='Path to VIM classification output (e.g. $OUTPUT_ROOT/classification_logs)')
+    parser.add_argument('--seg-work-dirs', default=_seg_default, type=str, help='Path to segmentation work directories')
+    parser.add_argument('--det-work-dirs', default=_det_default, type=str, help='Path to detection work directories')
     parser.add_argument('--output', default='./all_discretization_comparison', type=str, help='Output directory for results')
     return parser
 

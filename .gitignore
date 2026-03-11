@@ -9,6 +9,7 @@ mamba/mamba_ssm/models/__pycache__/*
 causal-conv1d/build/
 causal-conv1d/causal_conv1d.egg-info/
 causal-conv1d/causal_conv1d_cuda.cpython-310-x86_64-linux-gnu.so
+detection_discretization_comparison_test/
 mamba/build/
 mamba/mamba_ssm.egg-info/
 mamba/selective_scan_cuda.cpython-310-x86_64-linux-gnu.so
@@ -17,6 +18,7 @@ causal-conv1d/
 backup-setup-guide/
 work_dirs/
 output/
+documentation/
 __pycache__/
 wandb/
 *.wandb
