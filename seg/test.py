@@ -191,7 +191,8 @@ def main():
             json_file = osp.join(args.work_dir,
                                  f'eval_single_scale_{timestamp}.json')
     elif rank == 0:
-        work_dir = osp.join('./work_dirs',
+        output_root = os.environ.get('OUTPUT_ROOT', '.')
+        work_dir = osp.join(output_root, 'segmentation_logs',
                             osp.splitext(osp.basename(args.config))[0])
         mmengine.utils.mkdir_or_exist(osp.abspath(work_dir))
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
@@ -378,7 +379,8 @@ def main():
     if args.work_dir is not None:
         work_dir = args.work_dir
     else:
-        work_dir = osp.join('./work_dirs',
+        output_root = os.environ.get('OUTPUT_ROOT', '.')
+        work_dir = osp.join(output_root, 'segmentation_logs',
                             osp.splitext(osp.basename(args.config))[0])
     
     runner = Runner(

@@ -1,5 +1,6 @@
 #!/bin/bash
 # This script runs training for all discretization methods on ADE20K semantic segmentation
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 echo "=========================================="
 echo "Running Vision Mamba Discretization Experiments"
@@ -26,5 +27,5 @@ bash ./scripts/discretization/CC-Rorqual/ft_vim_tiny_upernet_rk4.sh
 
 echo "=========================================="
 echo "All segmentation discretization experiments completed!"
-echo "Results saved in work_dirs/vimseg-t-{method}/"
+echo "Results saved in \${OUTPUT_ROOT:-$SCRATCH/output}/segmentation_logs/"
 echo "=========================================="

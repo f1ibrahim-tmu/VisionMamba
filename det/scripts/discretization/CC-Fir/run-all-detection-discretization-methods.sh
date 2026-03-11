@@ -1,5 +1,6 @@
 #!/bin/bash
 # This script runs training for all discretization methods on MS-COCO object detection
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 echo "=========================================="
 echo "Running Vision Mamba Discretization Experiments"
@@ -26,5 +27,5 @@ bash ./scripts/discretization/CC-Fir/ft_vim_tiny_vimdet_rk4.sh
 
 echo "=========================================="
 echo "All detection discretization experiments completed!"
-echo "Results saved in work_dirs/cascade_mask_rcnn_vimdet_t_100ep_adj1_{method}-4gpu/"
+echo "Results saved in \${OUTPUT_ROOT:-$SCRATCH/output}/detection_logs/"
 echo "=========================================="

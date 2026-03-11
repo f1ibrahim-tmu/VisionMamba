@@ -2,14 +2,18 @@ import math
 import torch
 import torch.nn as nn
 
-from timm.layers import DropPath
-from timm.layers import trunc_normal_
-from timm.models.vision_transformer import _load_weights
+from timm.layers import DropPath, trunc_normal_
+# _load_weights removed - was imported but unused
 import torch.utils.checkpoint as checkpoint
 
 from mmcv_custom import load_checkpoint
-from mmseg.utils import get_root_logger
-from mmseg.models.builder import BACKBONES
+from mmengine.logging import MMLogger
+# MMSegmentation 1.0.0+ uses registry system
+try:
+    from mmseg.registry import MODELS as BACKBONES
+except ImportError:
+    # Fallback for older versions
+    from mmseg.models.builder import BACKBONES
 
 # add the root path to the system path
 import sys, os
@@ -40,6 +44,7 @@ class VisionMambaSeg(VisionMamba):
         if_fpn=True,
         use_residual_as_feature=False,
         last_layer_process="none",
+        init_backward_from_forward=True,
         **kwargs
     ):
 
@@ -47,7 +52,17 @@ class VisionMambaSeg(VisionMamba):
         ft_seq_len = img_size // patch_size
         kwargs['ft_seq_len'] = ft_seq_len
 
-        super().__init__(img_size, patch_size, stride, depth, embed_dim, in_chans, num_classes, **kwargs)
+        self.init_backward_from_forward = init_backward_from_forward
+        super().__init__(
+            img_size=img_size,
+            patch_size=patch_size,
+            stride=stride,
+            depth=depth,
+            embed_dim=embed_dim,
+            channels=in_chans,
+            num_classes=num_classes,
+            **kwargs
+        )
 
         self.use_checkpoint = use_checkpoint
         self.out_indices = out_indices
@@ -105,6 +120,49 @@ class VisionMambaSeg(VisionMamba):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    def _init_missing_bidirectional_from_forward(self, missing_keys, logger):
+        """Initialize missing backward (bidirectional) Mamba params from forward params.
+        When loading a unidirectional checkpoint into a bidirectional model, layers.*.mixer.*_b
+        keys are missing. Copy from the corresponding forward param so the backbone is valid.
+        """
+        if not missing_keys:
+            return
+        model_sd = self.state_dict()
+        forward_from_backward = {
+            ".mixer.D_b": ".mixer.D",
+            ".mixer.dt_proj_b.": ".mixer.dt_proj.",
+            ".mixer.A_b_log": ".mixer.A_log",
+            ".mixer.x_proj_b.": ".mixer.x_proj.",
+            ".mixer.conv1d_b.": ".mixer.conv1d.",
+        }
+        n_copied = 0
+        with torch.no_grad():
+            for key in missing_keys:
+                if ".mixer." not in key:
+                    continue
+                forward_key = None
+                for suff, repl in forward_from_backward.items():
+                    if suff in key:
+                        forward_key = key.replace(suff, repl)
+                        break
+                if forward_key is None or forward_key not in model_sd:
+                    continue
+                if key not in model_sd:
+                    continue
+                src = model_sd[forward_key]
+                dst = model_sd[key]
+                if src.shape != dst.shape:
+                    logger.warning(
+                        f"Skipping copy {forward_key} -> {key}: shape mismatch "
+                        f"{src.shape} vs {dst.shape}"
+                    )
+                    continue
+                dst.copy_(src)
+                n_copied += 1
+                logger.info(f"Initialized {key} from pretrained {forward_key} (unidirectional ckpt)")
+        if n_copied > 0:
+            logger.info(f"Initialized {n_copied} missing bidirectional Mamba params from forward.")
+
     def init_weights(self, pretrained=None):
         """Initialize the weights in backbone.
 
@@ -124,7 +182,7 @@ class VisionMambaSeg(VisionMamba):
 
         if isinstance(pretrained, str):
             self.apply(_init_weights)
-            logger = get_root_logger()
+            logger = MMLogger.get_instance(name='mmseg')
 
             # load_checkpoint(self, pretrained, strict=False, logger=logger)
 
@@ -185,9 +243,16 @@ class VisionMambaSeg(VisionMamba):
             
             interpolate_pos_embed(self, state_dict_model)
 
-            res = self.load_state_dict(state_dict_model, strict=False) 
+            res = self.load_state_dict(state_dict_model, strict=False)
             logger.info(res)
             print(res)
+            # If checkpoint was unidirectional but model is bidirectional, optionally copy forward -> backward.
+            if self.init_backward_from_forward:
+                self._init_missing_bidirectional_from_forward(res.missing_keys, logger)
+            elif res.missing_keys:
+                logger.warning(
+                    f"init_backward_from_forward=False: {len(res.missing_keys)} missing keys (e.g. backward Mamba params) left at random init."
+                )
         elif pretrained is None:
             self.apply(_init_weights)
         else:
@@ -224,6 +289,15 @@ class VisionMambaSeg(VisionMamba):
         return residual
     
     def forward_features(self, x, inference_params=None):
+        # MMSeg 1.x passes inputs as a list containing the tensor
+        if isinstance(x, (list, tuple)):
+            x = x[0]
+        # Handle 3D input (C, H, W) -> (1, C, H, W)
+        if x.dim() == 3:
+            x = x.unsqueeze(0)
+        # Ensure float type (pipeline may pass uint8)
+        if not x.is_floating_point():
+            x = x.float()
         B, C, H, W = x.shape
         # x, (Hp, Wp) = self.patch_embed(x)
         x = self.patch_embed(x)

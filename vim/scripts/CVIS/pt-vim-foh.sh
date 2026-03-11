@@ -2,6 +2,7 @@
 
 # conda activate conda_visionmamba
 # cd ./projects/VisionMamba/vim;
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 \
     --master_port=0 \
@@ -13,5 +14,5 @@ OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --lr 0.002 \
     --num_workers 0 \
     --data-path /data/fady/datasets/imagenet-1k \
-    --output_dir ./output/vim_tiny_foh \
-    --resume ./output/vim_tiny_foh/checkpoint.pth 
+    --output_dir "${OUTPUT_ROOT}/classification_logs/vim_tiny_foh" \
+    --resume "${OUTPUT_ROOT}/classification_logs/vim_tiny_foh/checkpoint.pth" 
