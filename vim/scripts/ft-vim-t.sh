@@ -1,6 +1,7 @@
 #!/bin/bash
 conda activate <your_env>
 cd <path_to_Vim>/vim;
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.run --nproc_per_node=8 --master_port=0 main.py \
     --model vim_tiny_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
@@ -12,7 +13,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.run --nproc_per
     --weight-decay 1e-8 \
     --num_workers 2 \
     --data-path <path_to_IN1K_dataset> \
-    --output_dir ./output/vim_tiny_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
+    --output_dir "${OUTPUT_ROOT}/classification_logs/vim_tiny_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2" \
     --epochs 30 \
     --finetune <path_to_pt_ckpt> \
     --no_amp

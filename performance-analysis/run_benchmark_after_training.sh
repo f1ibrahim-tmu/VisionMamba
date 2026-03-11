@@ -5,11 +5,11 @@
 # Example:
 #   ./performance-analysis/run_benchmark_after_training.sh \
 #       vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \
-#       ./output/classification_logs/vim_tiny_zoh
+#       \${OUTPUT_ROOT:-$SCRATCH/output}/classification_logs/vim_tiny_zoh
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <model_name> <output_dir>"
-    echo "Example: $0 vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 ./output/vim_tiny_zoh"
+    echo "Example: $0 vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2 \${OUTPUT_ROOT:-$SCRATCH/output}/classification_logs/vim_tiny_zoh"
     exit 1
 fi
 

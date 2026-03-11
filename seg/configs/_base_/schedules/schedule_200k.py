@@ -20,7 +20,7 @@ default_hooks = dict(
     timer=dict(type='IterTimerHook'),
     logger=dict(type='LoggerHook', interval=50, log_metric_by_epoch=False),
     param_scheduler=dict(type='ParamSchedulerHook'),
-    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=1000, max_keep_ckpts=4),
+    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=5000, max_keep_ckpts=4),
     sampler_seed=dict(type='DistSamplerSeedHook'),
     visualization=dict(type='SegVisualizationHook'))
 evaluation = dict(interval=2000, metric='mIoU', save_best='mIoU', rule='greater')

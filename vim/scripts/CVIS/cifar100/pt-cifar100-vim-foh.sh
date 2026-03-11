@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Accept seed as first argument, default to 0
 SEED=${1:-0}
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 
 # Change to project root to ensure relative paths work
 cd "$PROJECT_ROOT"
@@ -24,5 +25,5 @@ OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run -
     --data-set CIFAR \
     --data-path /data/fady/datasets/cifar100 \
     --seed $SEED \
-    --output_dir ./output/classification_logs/cifar100/vim_tiny_foh_seed${SEED} \
-    --resume ./output/classification_logs/cifar100/vim_tiny_foh_seed${SEED}/checkpoint.pth 
+    --output_dir "${OUTPUT_ROOT}/classification_logs/cifar100/vim_tiny_foh_seed${SEED}" \
+    --resume "${OUTPUT_ROOT}/classification_logs/cifar100/vim_tiny_foh_seed${SEED}/checkpoint.pth" 

@@ -6,6 +6,7 @@
 #                 If not provided, defaults to ./datasets
 #   Note: Detectron2 expects COCO at ${DETECTRON2_DATASETS}/coco/
 
+# 1. Dataset Path Logic
 # Get dataset path from command line argument or use default
 # Expected structure: ${DETECTRON2_DATASETS}/coco/ (so we use parent of coco directory)
 if [ -z "$1" ]; then
@@ -18,24 +19,24 @@ fi
 
 export DETECTRON2_DATASETS
 
-# Generate unique port based on SLURM job ID (if available) or use process ID
-# Port range: 29500-29999 (500 ports available)
-if [ -n "$SLURM_JOB_ID" ]; then
-    MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
-else
-    # Fallback: use process ID if not in SLURM environment
-    MASTER_PORT=$((29500 + $$ % 500))
-fi
-export MASTER_PORT
-
-echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
+# 2. Training Variables
+OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
+# Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_bilinear
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
-PRETRAIN_CKPT=/home/f7ibrahi/projects/def-wangcs/f7ibrahi/projects/VisionMamba/output/classification_logs/vim_tiny_bilinear/best_checkpoint.pth
-OUTPUT_DIR=output/detection_logs/vim_tiny_vimdet_bilinear
+PRETRAIN_CKPT="${OUTPUT_ROOT}/classification_logs/vim_tiny_bilinear/best_checkpoint.pth"
+OUTPUT_DIR="${OUTPUT_ROOT}/detection_logs/vim_tiny_fir_vimdet_bilinear"
+# Calculate workers per GPU based on the 12-core optimization (Option 3C)
+# Reserves 4 cores for main training processes; allocates 2 workers per GPU
+# Formula: (12 total cores - 4 main processes) / 4 GPUs = 2 workers per GPU
+WORKERS_PER_GPU=$(((SLURM_CPUS_PER_TASK - 4) / 4))
+# Safety check: Ensure we don't drop below 1 worker per GPU
+[ "$WORKERS_PER_GPU" -lt 1 ] && WORKERS_PER_GPU=1
+echo "Allocated $SLURM_CPUS_PER_TASK CPUs. Setting WORKERS_PER_GPU to $WORKERS_PER_GPU"
 
-# Check if we should resume training
+# 3. Resume Logic
 # The checkpointer looks for a 'last_checkpoint' file in the output directory
 RESUME_FLAG=""
 LAST_CHECKPOINT_FILE="${OUTPUT_DIR}/last_checkpoint"
@@ -48,16 +49,38 @@ else
     echo "Note: train.init_checkpoint is set to empty string, so pretrained backbone weights will be loaded from ${PRETRAIN_CKPT}"
 fi
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port $MASTER_PORT \
-    det/tools/lazyconfig_train_net.py \
+# Generate unique port based on SLURM job ID (if available) or use process ID
+# Port range: 29500-29999 (500 ports available)
+if [ -n "$SLURM_JOB_ID" ]; then
+    MASTER_PORT=$((29500 + ${SLURM_JOB_ID} % 500))
+else
+    # Fallback: use process ID if not in SLURM environment
+    MASTER_PORT=$((29500 + $$ % 500))
+fi
+export MASTER_PORT
+echo "Using MASTER_PORT=$MASTER_PORT for job ${SLURM_JOB_ID:-$$}"
+
+# 4. Training Command
+# CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --nproc_per_node=4 --master_port=$MASTER_PORT \
+#     det/tools/lazyconfig_train_net.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
+    --num-gpus 4 \
     --config-file ${DET_CONFIG} \
     ${RESUME_FLAG} \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
-    dataloader.train.total_batch_size=32 \
-    dataloader.train.num_workers=16 \
-    dataloader.test.num_workers=8 \
+    dataloader.train.total_batch_size=48 \
+    dataloader.train.num_workers=${WORKERS_PER_GPU} \
+    dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
+    dataloader.train.prefetch_factor=2 \
+    dataloader.train.persistent_workers=True \
     model.backbone.net.discretization_method=bilinear \
-    model.backbone.net.pretrained=${PRETRAIN_CKPT}
-    # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \
+    model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
+    model.backbone.net.pretrained=${PRETRAIN_CKPT} \
+    optimizer.lr=1e-4 \
+    optimizer.weight_decay=0.1
+    # --use-wandb \
+    # --wandb-project visionmamba \
+    # --wandb-run-name vim_tiny_vimdet_bilinear_cc-fir \
+    # --wandb-tags detection bilinear cc-fir \
 
