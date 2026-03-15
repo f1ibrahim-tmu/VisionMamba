@@ -470,6 +470,7 @@ class Mamba(nn.Module):
                     self.D.float(),
                     delta_bias=self.dt_proj.bias.float(),
                     delta_softplus=True,
+                    discretization_method=self.discretization_method,
                     A_blocks=A_blocks,
                     A_U=A_U,
                     A_V=A_V,

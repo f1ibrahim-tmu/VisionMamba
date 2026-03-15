@@ -1209,7 +1209,7 @@ class BiMambaInnerFn(torch.autograd.Function):
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1,
+                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh",
                 # Feature-SST: Structured A components for forward direction
                 A_blocks=None, A_U=None, A_V=None, block_size=0, low_rank_rank=0,
                 # Feature-SST: Structured A components for backward direction (optional)
@@ -1275,8 +1275,16 @@ class BiMambaInnerFn(torch.autograd.Function):
                                and block_size > 0 and low_rank_rank > 0)
         
         # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
-        # Default to zoh (0) for BiMambaInnerFn
-        disc_method_enum = 0
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
+        ctx.disc_method_enum = disc_method_enum
         
         # Feature-SST: Use structured A if provided
         if use_structured_A:
@@ -1387,7 +1395,7 @@ class BiMambaInnerFn(torch.autograd.Function):
             # Forward direction backward with structured A
             dconv1d_out, ddelta, dA, dB, dC, dD, ddelta_bias, dz, out_z_f = selective_scan_cuda.bwd(
                 conv1d_out, delta, A, B, C, D, z, delta_bias, dout_y, scan_intermediates_f, out_f, dz,
-                ctx.delta_softplus, True, 0,  # disc_method_enum = 0 (ZOH)
+                ctx.delta_softplus, True, ctx.disc_method_enum,
                 A_blocks_tensor, A_U_contig, A_V_contig, ctx.block_size, ctx.low_rank_rank
             )
             
@@ -1411,7 +1419,7 @@ class BiMambaInnerFn(torch.autograd.Function):
                 conv1d_out.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, 
                 z.flip([-1]) if z is not None else None, delta_bias, dout_y.flip([-1]), 
                 scan_intermediates_b, out_b, dz_b,
-                ctx.delta_softplus, True, 0,  # disc_method_enum = 0 (ZOH)
+                ctx.delta_softplus, True, ctx.disc_method_enum,
                 A_b_blocks_tensor, A_b_U_contig, A_b_V_contig, ctx.block_size, ctx.low_rank_rank
             )
         else:
@@ -1479,7 +1487,7 @@ class BiMambaInnerFn(torch.autograd.Function):
                 dout_proj_weight, dout_proj_bias,
                 dA, dA_b, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None)
 
 def mamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
@@ -1495,14 +1503,14 @@ def bimamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True,
+    C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh",
     # Feature-SST: Structured A components
     A_blocks=None, A_U=None, A_V=None, block_size=0, low_rank_rank=0,
     A_b_blocks=None, A_b_U=None, A_b_V=None
 ):
     return BiMambaInnerFn.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                               out_proj_weight, out_proj_bias,
-                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus,
+                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl, discretization_method,
                               A_blocks, A_U, A_V, block_size, low_rank_rank,
                               A_b_blocks, A_b_U, A_b_V)
 
