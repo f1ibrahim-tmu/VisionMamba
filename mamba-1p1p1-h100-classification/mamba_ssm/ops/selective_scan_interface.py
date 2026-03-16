@@ -1075,7 +1075,7 @@ class BiMambaInnerFn(torch.autograd.Function):
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
+                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh"):
         """
              xz: (batch, dim, seqlen)
         """
@@ -1131,8 +1131,15 @@ class BiMambaInnerFn(torch.autograd.Function):
         if D is not None:
             D = D.contiguous()
         # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
-        # Default to zoh (0) for BiMambaInnerFn
-        disc_method_enum = 0
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
         out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
@@ -1239,7 +1246,7 @@ class BiMambaInnerFn(torch.autograd.Function):
                 dout_proj_weight, dout_proj_bias,
                 dA, dA_b, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None)
 
 def mamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
@@ -1255,11 +1262,11 @@ def bimamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh"
 ):
     return BiMambaInnerFn.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                               out_proj_weight, out_proj_bias,
-                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus)
+                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl, discretization_method)
 
 
 def mamba_inner_fn_no_out_proj(
