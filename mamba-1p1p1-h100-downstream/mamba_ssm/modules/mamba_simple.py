@@ -220,6 +220,7 @@ class Mamba(nn.Module):
                     self.D.float(),
                     delta_bias=self.dt_proj.bias.float(),
                     delta_softplus=True,
+                    discretization_method=self.discretization_method,
                 )    
             elif self.bimamba_type == "v2":
                 A_b = -torch.exp(self.A_b_log.float())
