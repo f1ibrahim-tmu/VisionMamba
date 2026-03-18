@@ -78,7 +78,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
     optimizer.lr=1e-4 \
-    optimizer.weight_decay=0.1
+    optimizer.weight_decay=0.01
     # --use-wandb \
     # --wandb-project visionmamba \
     # --wandb-run-name vim_tiny_vimdet_highorder_cc-fir \

@@ -47,5 +47,5 @@ CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.run --standalone --nproc_per_
     model.backbone.net.discretization_method=zoh \
     model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
     optimizer.lr=1e-4 \
-    optimizer.weight_decay=0.1
+    optimizer.weight_decay=0.01
     # --num-gpus 4 --num-machines 1 --machine-rank 0 --dist-url "tcp://127.13.44.12:60903" \
