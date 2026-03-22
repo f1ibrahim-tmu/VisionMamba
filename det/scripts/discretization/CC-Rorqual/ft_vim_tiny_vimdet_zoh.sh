@@ -22,7 +22,7 @@ export DETECTRON2_DATASETS
 # 2. Training Variables
 OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRATCH/output}"
 # Init backward Mamba params from forward when loading unidirectional ckpt (default: true). Set INIT_BACKWARD_FROM_FORWARD=false to disable.
-INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-true}
+INIT_BACKWARD_FROM_FORWARD=${INIT_BACKWARD_FROM_FORWARD:-false}
 
 DET_CONFIG_NAME=cascade_mask_rcnn_vimdet_t_100ep_adj1_zoh
 DET_CONFIG=projects/ViTDet/configs/COCO/${DET_CONFIG_NAME}.py
