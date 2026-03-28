@@ -47,6 +47,12 @@ class SelectiveScanFn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
                 return_last_state=False, discretization_method="zoh", use_cuda_kernel=None):
+        if discretization_method != "zoh":
+            raise RuntimeError(
+                "SelectiveScanFn only implements the ZOH CUDA backward. "
+                "Use selective_scan_fn(...) for discretization_method=%r (autograd via Python reference)."
+                % (discretization_method,)
+            )
         if u.stride(-1) != 1:
             u = u.contiguous()
         if delta.stride(-1) != 1:
@@ -126,14 +132,8 @@ class SelectiveScanFn(torch.autograd.Function):
         ctx.use_cuda_kernel = False
         if not return_last_state:
             return result
-        else:
-            out, last_state = result
-            return out, last_state
-        if not return_last_state:
-            return result
-        else:
-            out, last_state = result
-            return out, last_state
+        out, last_state = result
+        return out, last_state
 
     @staticmethod
     def backward(ctx, dout, *args):
@@ -146,11 +146,7 @@ class SelectiveScanFn(torch.autograd.Function):
         if dout.stride(-1) != 1:
             dout = dout.contiguous()
         
-        # If using a non-ZOH method and we need to implement backward, this would be handled here
-        if hasattr(ctx, 'discretization_method') and ctx.discretization_method != "zoh":
-            # For now, this is not implemented, so we'll use the default backward
-            pass
-            
+        # ZOH-only: selective_scan_fn routes non-ZOH through selective_scan_ref (PyTorch autograd).
         # The kernel supports passing in a pre-allocated dz (e.g., in case we want to fuse the
         # backward of selective_scan_cuda with the backward of chunk).
         # Here we just pass in None and dz will be allocated in the C++ code.
@@ -188,8 +184,43 @@ def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_
             If True: Force use of CUDA kernel (if available)
             If False: Force use of Python reference implementation
             If None: Auto-select (try CUDA first, fallback to Python)
+
+    Non-ZOH methods use the differentiable Python reference here so autograd matches the forward
+    discretization. (SelectiveScanFn's CUDA backward only implements ZOH; using it for FOH /
+    bilinear / poly / highorder / RK4 produced wrong gradients and training collapse.)
     """
-    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state, discretization_method, use_cuda_kernel)
+    if discretization_method != "zoh":
+        result = selective_scan_ref(
+            u,
+            delta,
+            A,
+            B,
+            C,
+            D,
+            z,
+            delta_bias,
+            delta_softplus,
+            return_last_state,
+            discretization_method,
+        )
+        if not return_last_state:
+            return result
+        out, last_state = result
+        return out, last_state
+    return SelectiveScanFn.apply(
+        u,
+        delta,
+        A,
+        B,
+        C,
+        D,
+        z,
+        delta_bias,
+        delta_softplus,
+        return_last_state,
+        discretization_method,
+        use_cuda_kernel,
+    )
 
 
 def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
@@ -220,6 +251,9 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         delta = delta + delta_bias[..., None].float()
     if delta_softplus:
         delta = F.softplus(delta)
+    # Same motivation as ZOH: cap delta before exp(δA), matrix inverses, and high-order terms.
+    if discretization_method != "zoh":
+        delta = torch.clamp(delta, max=5.0)
     batch, dim, dstate = u.shape[0], A.shape[0], A.shape[1]
     is_variable_B = B.dim() >= 3
     is_variable_C = C.dim() >= 3
@@ -237,7 +271,12 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     # Discretization methods
     if discretization_method == "zoh":
         # Zero Order Hold (original implementation)
+        # Clamp delta to prevent numerical explosion in exp(delta * A)
+        # This is critical for detection tasks where pretrained weights may have large dt_proj values
+        delta = torch.clamp(delta, max=5.0)  # Prevent explosion: exp(5 * A) is still manageable
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        # Clamp deltaA result to prevent Inf values that cause training divergence
+        deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)  # Prevent Inf/NaN in downstream computations
         if not is_variable_B:
             deltaB_u = torch.einsum('bdl,dn,bdl->bdln', delta, B, u)
         else:
@@ -254,6 +293,7 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         # (exp(A*Δ) - 1 - A*Δ) / A^2 = Δ²/2! + A*Δ³/3! + A²*Δ⁴/4! + A³*Δ⁵/5! + ...
         # So: B_d = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120) * B
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)
         
         # Compute powers of delta (bdl shape)
         delta_sq = delta ** 2
@@ -405,14 +445,19 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
     
     elif discretization_method == "poly":
-        # Polynomial Interpolation (Correct Formula):
+        # Polynomial Interpolation (Non-Causal, Bidirectional):
         # B̄ = A⁻¹(exp(AΔ)-I)B + ½A⁻²(exp(AΔ)-I-AΔ)B
         # Using Taylor expansion to avoid division:
         # ZOH term: A⁻¹(exp(AΔ)-I) = Δ + AΔ²/2 + A²Δ³/6 + A³Δ⁴/24
         # ½FOH term: ½A⁻²(exp(AΔ)-I-AΔ) = Δ²/4 + AΔ³/12 + A²Δ⁴/48
         # Combined: B̄ = (Δ + (A/2 + 1/4)Δ² + (A²/6 + A/12)Δ³ + (A³/24 + A²/48)Δ⁴) * B
+        # 
+        # NOTE: Polynomial Interpolation is NON-CAUSAL - it uses bidirectional scan
+        # to access both past and future information, creating smooth interpolation
+        # between points (like bicubic interpolation in image resizing)
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
-        
+        deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)
+
         # Compute powers of delta
         delta_sq = delta ** 2
         delta_cubed = delta ** 3
@@ -490,7 +535,7 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
                 deltaB_u = deltaB * u.unsqueeze(-1)
     
     elif discretization_method == "highorder":
-        # Higher-Order Hold (n=2, Quadratic) - Correct Generalized Formula:
+        # Higher-Order Hold (n=2, Quadratic) - CAUSAL Method:
         # B̄ = Σ(i=0 to n) A^(-(i+1)) * [exp(AΔ) - Σ(k=0 to i)(AΔ)^k/k!] / i! * B
         # For n=2: Combines ZOH (n=0) + FOH (n=1) + Quadratic (n=2) terms
         #
@@ -504,7 +549,13 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         # Δ² term: A/2 + 1/2
         # Δ³ term: A²/6 + A/6 + 1/12
         # Δ⁴ term: A³/24 + A²/24 + A/48
+        #
+        # NOTE: HOH is CAUSAL - delta (Δ) is applied at the INPUT/SAMPLING stage.
+        # It only uses past information to project forward, like "shooting in the dark"
+        # based on momentum from previous points. This can cause overshoot when the
+        # signal changes direction suddenly.
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)
         
         # Compute powers of delta
         delta_sq = delta ** 2
@@ -595,6 +646,7 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         
         # Compute A_d using RK4
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
+        deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)
         
         if not is_variable_B:
             # Compute B_d using RK4 coefficients
@@ -920,7 +972,7 @@ class MambaInnerFn(torch.autograd.Function):
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
+                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh"):
         """
              xz: (batch, dim, seqlen)
         """
@@ -979,8 +1031,16 @@ class MambaInnerFn(torch.autograd.Function):
         if D is not None:
             D = D.contiguous()
         # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
-        # Default to zoh (0) for MambaInnerFn
-        disc_method_enum = 0
+        # Map discretization method string to enum value
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
@@ -1064,7 +1124,7 @@ class MambaInnerFn(torch.autograd.Function):
                 dout_proj_weight, dout_proj_bias,
                 dA, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None, None)
 
 
 class BiMambaInnerFn(torch.autograd.Function):
@@ -1074,7 +1134,7 @@ class BiMambaInnerFn(torch.autograd.Function):
     def forward(ctx, xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                 out_proj_weight, out_proj_bias,
                 A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1):
+                C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh"):
         """
              xz: (batch, dim, seqlen)
         """
@@ -1130,8 +1190,16 @@ class BiMambaInnerFn(torch.autograd.Function):
         if D is not None:
             D = D.contiguous()
         # discretization_method enum: 0=zoh, 1=foh, 2=bilinear, 3=poly, 4=highorder, 5=rk4
-        # Default to zoh (0) for BiMambaInnerFn
-        disc_method_enum = 0
+        # Map discretization method string to enum value
+        disc_method_map = {
+            "zoh": 0,
+            "foh": 1,
+            "bilinear": 2,
+            "poly": 3,
+            "highorder": 4,
+            "rk4": 5
+        }
+        disc_method_enum = disc_method_map.get(discretization_method, 0)
         out_f, scan_intermediates_f, out_z_f = selective_scan_cuda.fwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus, disc_method_enum
         )
@@ -1238,27 +1306,66 @@ class BiMambaInnerFn(torch.autograd.Function):
                 dout_proj_weight, dout_proj_bias,
                 dA, dA_b, dB, dC, dD,
                 ddelta_bias if delta_bias is not None else None,
-                dB_proj_bias, dC_proj_bias, None)
+                dB_proj_bias, dC_proj_bias, None, None, None)
 
 def mamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, discretization_method="zoh"
 ):
+    if discretization_method != "zoh":
+        return mamba_inner_ref(
+            xz,
+            conv1d_weight,
+            conv1d_bias,
+            x_proj_weight,
+            delta_proj_weight,
+            out_proj_weight,
+            out_proj_bias,
+            A,
+            B,
+            C,
+            D,
+            delta_bias,
+            B_proj_bias,
+            C_proj_bias,
+            delta_softplus,
+            discretization_method,
+        )
     return MambaInnerFn.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                               out_proj_weight, out_proj_bias,
-                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus)
+                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, discretization_method)
 
 def bimamba_inner_fn(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, discretization_method="zoh"
 ):
+    if discretization_method != "zoh":
+        return bimamba_inner_ref(
+            xz,
+            conv1d_weight,
+            conv1d_bias,
+            x_proj_weight,
+            delta_proj_weight,
+            out_proj_weight,
+            out_proj_bias,
+            A,
+            A_b,
+            B,
+            C,
+            D,
+            delta_bias,
+            B_proj_bias,
+            C_proj_bias,
+            delta_softplus,
+            discretization_method,
+        )
     return BiMambaInnerFn.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                               out_proj_weight, out_proj_bias,
-                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus)
+                              A, A_b, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl, discretization_method)
 
 
 def mamba_inner_fn_no_out_proj(
@@ -1269,15 +1376,77 @@ def mamba_inner_fn_no_out_proj(
     import os
     if checkpoint_lvl is None:
         checkpoint_lvl = int(os.environ.get("MAMBA_CHECKPOINT_LVL", "1"))
+    if discretization_method != "zoh":
+        return mamba_inner_no_out_proj_ref(
+            xz,
+            conv1d_weight,
+            conv1d_bias,
+            x_proj_weight,
+            delta_proj_weight,
+            A,
+            B,
+            C,
+            D,
+            delta_bias,
+            B_proj_bias,
+            C_proj_bias,
+            delta_softplus,
+            discretization_method,
+        )
     return MambaInnerFnNoOutProj.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
                               A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl, discretization_method)
+
+
+def mamba_inner_no_out_proj_ref(
+    xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
+    A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
+    C_proj_bias=None, delta_softplus=True, discretization_method="zoh",
+):
+    """PyTorch Mamba inner block without out_proj; used for non-ZOH (correct autograd vs fused CUDA)."""
+    assert causal_conv1d_fn is not None, "causal_conv1d_fn is not available. Please install causal-conv1d."
+    L = xz.shape[-1]
+    delta_rank = delta_proj_weight.shape[1]
+    d_state = A.shape[-1] * (1 if not A.is_complex() else 2)
+    x, z = xz.chunk(2, dim=1)
+    x = causal_conv1d_fn(x, rearrange(conv1d_weight, "d 1 w -> d w"), conv1d_bias, activation="silu")
+    x_dbl = F.linear(rearrange(x, "b d l -> (b l) d"), x_proj_weight)
+    delta = delta_proj_weight @ x_dbl[:, :delta_rank].t()
+    delta = rearrange(delta, "d (b l) -> b d l", l=L)
+    if B is None:
+        B = x_dbl[:, delta_rank : delta_rank + d_state]
+        if B_proj_bias is not None:
+            B = B + B_proj_bias.to(dtype=B.dtype)
+        if not A.is_complex():
+            B = rearrange(B, "(b l) dstate -> b dstate l", l=L).contiguous()
+        else:
+            B = rearrange(B, "(b l) (dstate two) -> b dstate (l two)", l=L, two=2).contiguous()
+    if C is None:
+        C = x_dbl[:, -d_state:]
+        if C_proj_bias is not None:
+            C = C + C_proj_bias.to(dtype=C.dtype)
+        if not A.is_complex():
+            C = rearrange(C, "(b l) dstate -> b dstate l", l=L).contiguous()
+        else:
+            C = rearrange(C, "(b l) (dstate two) -> b dstate (l two)", l=L, two=2).contiguous()
+    return selective_scan_fn(
+        x,
+        delta,
+        A,
+        B,
+        C,
+        D,
+        z=z,
+        delta_bias=delta_bias,
+        delta_softplus=delta_softplus,
+        discretization_method=discretization_method,
+    )
 
 
 def mamba_inner_ref(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, discretization_method="zoh",
 ):
     assert causal_conv1d_fn is not None, "causal_conv1d_fn is not available. Please install causal-conv1d."
     L = xz.shape[-1]
@@ -1307,7 +1476,18 @@ def mamba_inner_ref(
             C = rearrange(C, "(b l) dstate -> b dstate l", l=L).contiguous()
         else:
             C = rearrange(C, "(b l) (dstate two) -> b dstate (l two)", l=L, two=2).contiguous()
-    y = selective_scan_fn(x, delta, A, B, C, D, z=z, delta_bias=delta_bias, delta_softplus=True)
+    y = selective_scan_fn(
+        x,
+        delta,
+        A,
+        B,
+        C,
+        D,
+        z=z,
+        delta_bias=delta_bias,
+        delta_softplus=delta_softplus,
+        discretization_method=discretization_method,
+    )
     return F.linear(rearrange(y, "b d l -> b l d"), out_proj_weight, out_proj_bias)
 
 
@@ -1315,7 +1495,7 @@ def bimamba_inner_ref(
     xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
     out_proj_weight, out_proj_bias,
     A, A_b, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True
+    C_proj_bias=None, delta_softplus=True, discretization_method="zoh",
 ):
     L = xz.shape[-1]
     delta_rank = delta_proj_weight.shape[1]
@@ -1344,7 +1524,29 @@ def bimamba_inner_ref(
             C = rearrange(C, "(b l) dstate -> b dstate l", l=L).contiguous()
         else:
             C = rearrange(C, "(b l) (dstate two) -> b dstate (l two)", l=L, two=2).contiguous()
-    y = selective_scan_fn(x, delta, A, B, C, D, z=z, delta_bias=delta_bias, delta_softplus=True)
-    y_b = selective_scan_fn(x.flip([-1]), delta.flip([-1]), A_b, B.flip([-1]), C.flip([-1]), D, z.flip([-1]), delta_bias, delta_softplus=True)
+    y = selective_scan_fn(
+        x,
+        delta,
+        A,
+        B,
+        C,
+        D,
+        z=z,
+        delta_bias=delta_bias,
+        delta_softplus=delta_softplus,
+        discretization_method=discretization_method,
+    )
+    y_b = selective_scan_fn(
+        x.flip([-1]),
+        delta.flip([-1]),
+        A_b,
+        B.flip([-1]),
+        C.flip([-1]),
+        D,
+        z=z.flip([-1]),
+        delta_bias=delta_bias,
+        delta_softplus=delta_softplus,
+        discretization_method=discretization_method,
+    )
     y = y + y_b.flip([-1])
     return F.linear(rearrange(y, "b d l -> b l d"), out_proj_weight, out_proj_bias)
