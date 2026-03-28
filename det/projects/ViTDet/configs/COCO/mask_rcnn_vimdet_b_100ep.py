@@ -1,5 +1,4 @@
 from functools import partial
-import torch
 from fvcore.common.param_scheduler import MultiStepParamScheduler
 
 from detectron2 import model_zoo
@@ -14,9 +13,12 @@ model = model_zoo.get_config("common/models/mask_rcnn_vimdet.py").model
 
 # Initialization and trainer settings
 train = model_zoo.get_config("common/train.py").train
-train.amp.enabled = True
-train.amp.precision = torch.bfloat16  # BF16 for H100 stability (wider exponent range than FP16)
-train.ddp.fp16_compression = False  # Disable FP16 gradient compression when using BF16 AMP
+# FP32 training: more stable for Mamba + alternate discretizations than BF16 AMP (see CC-Rorqual ViMDet runs).
+# Re-enable AMP for speed if stable: import torch; train.amp.enabled = True; train.amp.precision = torch.bfloat16
+train.amp.enabled = False
+train.ddp.fp16_compression = False
+# Align with seg ViM: avoid DDP errors when some params skip gradients in a step.
+train.ddp.find_unused_parameters = True
 train.init_checkpoint = (
     "detectron2://ImageNetPretrained/MAE/mae_pretrain_vit_base.pth?matching_heuristics=True"
 )
