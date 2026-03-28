@@ -69,7 +69,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     ${RESUME_FLAG} \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
-    dataloader.train.total_batch_size=24 \
+    dataloader.train.total_batch_size=48 \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     dataloader.train.prefetch_factor=2 \
@@ -77,7 +77,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     model.backbone.net.discretization_method=foh \
     model.backbone.net.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
     model.backbone.net.pretrained=${PRETRAIN_CKPT} \
-    optimizer.lr=3e-5 \
+    optimizer.lr=1e-4 \
     optimizer.weight_decay=0.01
     # --use-wandb \
     # --wandb-project visionmamba \
