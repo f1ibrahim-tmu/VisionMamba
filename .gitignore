@@ -19,6 +19,8 @@ backup-setup-guide/
 work_dirs/
 output/
 documentation/
+.cursor/      # Cursor AI config files
+.cursorrules/  # Cursor AI rules files
 __pycache__/
 wandb/
 *.wandb

@@ -15,8 +15,8 @@ model = model_zoo.get_config("common/models/mask_rcnn_vimdet.py").model
 train = model_zoo.get_config("common/train.py").train
 # FP32 training: more stable for Mamba + alternate discretizations than BF16 AMP (see CC-Rorqual ViMDet runs).
 # Re-enable AMP for speed if stable: import torch; train.amp.enabled = True; train.amp.precision = torch.bfloat16
-train.amp.enabled = False
-train.ddp.fp16_compression = False
+train.amp.enabled = True
+train.ddp.fp16_compression = True
 # Align with seg ViM: avoid DDP errors when some params skip gradients in a step.
 train.ddp.find_unused_parameters = True
 train.init_checkpoint = (
