@@ -1,6 +1,8 @@
 from functools import partial
 from fvcore.common.param_scheduler import MultiStepParamScheduler
 
+import torch
+
 from detectron2 import model_zoo
 from detectron2.config import LazyCall as L
 from detectron2.solver import WarmupParamScheduler
@@ -13,9 +15,10 @@ model = model_zoo.get_config("common/models/mask_rcnn_vimdet.py").model
 
 # Initialization and trainer settings
 train = model_zoo.get_config("common/train.py").train
-# FP32 training: more stable for Mamba + alternate discretizations than BF16 AMP (see CC-Rorqual ViMDet runs).
-# Re-enable AMP for speed if stable: import torch; train.amp.enabled = True; train.amp.precision = torch.bfloat16
+# AMP with bfloat16 on H100: lower VRAM than FP32 (helps FOH/Bilinear/Poly paths) and wider dynamic range than fp16 AMP.
+# If unstable for a discretization, smoke-test with fp32 or train.amp.precision = torch.float16 per lazyconfig_train_net defaults.
 train.amp.enabled = True
+train.amp.precision = torch.bfloat16
 train.ddp.fp16_compression = True
 # Align with seg ViM: avoid DDP errors when some params skip gradients in a step.
 train.ddp.find_unused_parameters = True
