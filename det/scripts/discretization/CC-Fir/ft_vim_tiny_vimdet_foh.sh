@@ -69,7 +69,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python det/tools/lazyconfig_train_net.py \
     ${RESUME_FLAG} \
     train.output_dir=${OUTPUT_DIR} \
     train.init_checkpoint="" \
-    dataloader.train.total_batch_size=12 \
+    dataloader.train.total_batch_size=4 \
     dataloader.train.num_workers=${WORKERS_PER_GPU} \
     dataloader.test.num_workers=$((WORKERS_PER_GPU / 2)) \
     dataloader.train.prefetch_factor=2 \
