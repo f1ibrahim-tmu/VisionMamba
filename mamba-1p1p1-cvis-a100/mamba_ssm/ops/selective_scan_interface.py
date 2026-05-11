@@ -31,6 +31,7 @@ else:
         return custom_bwd
 
 from einops import rearrange, repeat
+import os
 
 try:
     from causal_conv1d import causal_conv1d_fn
@@ -223,6 +224,24 @@ def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_
     )
 
 
+# Cap sequence tiles when materializing FOH deltaB_u so peak memory scales as O(B·D·chunk·N)
+# instead of always O(B·D·L·N). Results match building full L at once (verified bitwise on samples).
+_FOH_BUILD_CHUNK = 4096
+
+
+def _foh_chunk_size(seq_len):
+    return min(int(seq_len), _FOH_BUILD_CHUNK)
+
+
+def _stable_tustin_denominator(denom):
+    """Avoid divide-by-near-zero on diagonal Tustin denominators (real or complex)."""
+    dtype_r = denom.real.dtype if denom.is_complex() else denom.dtype
+    eps = float(torch.finfo(dtype_r).eps ** 0.5)
+    sg = torch.sgn(denom)
+    sg = torch.where(sg.abs() == 0, torch.ones_like(sg), sg)
+    return torch.where(denom.abs() < eps, sg * eps, denom)
+
+
 def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
                       return_last_state=False, discretization_method="zoh"):
     """
@@ -294,156 +313,108 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
         # So: B_d = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120) * B
         deltaA = torch.exp(torch.einsum('bdl,dn->bdln', delta, A))
         deltaA = torch.clamp(deltaA, min=1e-10, max=1e10)
-        
-        # Compute powers of delta (bdl shape)
-        delta_sq = delta ** 2
-        delta_cubed = delta ** 3
-        delta_4th = delta ** 4
-        delta_5th = delta ** 5
-        
+
+        L = delta.shape[2]
+        chunk = _foh_chunk_size(L)
+        deltaB_u = deltaA.new_empty(batch, dim, L, dstate)
+
+        A_exp = A.unsqueeze(0).unsqueeze(2)
+        A_sq = A ** 2
+        A_cubed = A ** 3
+        A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
+        A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
+
         if not is_variable_B:
-            # B_d * u = (Δ²/2 * B + A*Δ³/6 * B + A²*Δ⁴/24 * B + A³*Δ⁵/120 * B) * u
-            # Compute coefficient: Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120 for each (b,d,l,n)
-            # Then multiply by B and u
-            
-            # Expand delta powers to (B, D, L, 1) for broadcasting with A (D, N)
-            delta_sq_exp = delta_sq.unsqueeze(-1)  # (B, D, L, 1)
-            delta_cubed_exp = delta_cubed.unsqueeze(-1)
-            delta_4th_exp = delta_4th.unsqueeze(-1)
-            delta_5th_exp = delta_5th.unsqueeze(-1)
-            
-            A_exp = A.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
-            A_sq = A ** 2
-            A_cubed = A ** 3
-            A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
-            A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
-            B_exp = B.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
-            
-            # coeff * B = (Δ²/2 + A*Δ³/6 + A²*Δ⁴/24 + A³*Δ⁵/120) * B
-            deltaB = (delta_sq_exp / 2.0 * B_exp +
-                      delta_cubed_exp / 6.0 * A_exp * B_exp +
-                      delta_4th_exp / 24.0 * A_sq_exp * B_exp +
-                      delta_5th_exp / 120.0 * A_cubed_exp * B_exp)  # (B, D, L, N)
-            
-            deltaB_u = deltaB * u.unsqueeze(-1)  # (B, D, L, N)
-        else:
-            if B.dim() == 3:
-                # B is (B, N, L)
-                delta_sq_exp = delta_sq.unsqueeze(-1)  # (B, D, L, 1)
-                delta_cubed_exp = delta_cubed.unsqueeze(-1)
-                delta_4th_exp = delta_4th.unsqueeze(-1)
-                delta_5th_exp = delta_5th.unsqueeze(-1)
-                
-                A_exp = A.unsqueeze(0).unsqueeze(2)  # (1, D, 1, N)
-                A_sq = A ** 2
-                A_cubed = A ** 3
-                A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
-                A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
-                
-                # B: (B, N, L) -> (B, 1, L, N) for broadcasting
-                B_exp = B.unsqueeze(1).permute(0, 1, 3, 2)  # (B, 1, L, N)
-                
-                deltaB = (delta_sq_exp / 2.0 * B_exp +
-                          delta_cubed_exp / 6.0 * A_exp * B_exp +
-                          delta_4th_exp / 24.0 * A_sq_exp * B_exp +
-                          delta_5th_exp / 120.0 * A_cubed_exp * B_exp)  # (B, D, L, N)
-                
-                deltaB_u = deltaB * u.unsqueeze(-1)  # (B, D, L, N)
-            else:
-                B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
-                
+            B_exp = B.unsqueeze(0).unsqueeze(2)
+            for t0 in range(0, L, chunk):
+                t1 = min(t0 + chunk, L)
+                d_sl = delta[:, :, t0:t1]
+                u_sl = u[:, :, t0:t1]
+                delta_sq = d_sl ** 2
+                delta_cubed = d_sl ** 3
+                delta_4th = d_sl ** 4
+                delta_5th = d_sl ** 5
                 delta_sq_exp = delta_sq.unsqueeze(-1)
                 delta_cubed_exp = delta_cubed.unsqueeze(-1)
                 delta_4th_exp = delta_4th.unsqueeze(-1)
                 delta_5th_exp = delta_5th.unsqueeze(-1)
-                
-                A_exp = A.unsqueeze(0).unsqueeze(2)
-                A_sq = A ** 2
-                A_cubed = A ** 3
-                A_sq_exp = A_sq.unsqueeze(0).unsqueeze(2)
-                A_cubed_exp = A_cubed.unsqueeze(0).unsqueeze(2)
-                
-                # B: (B, D, N, L) -> (B, D, L, N) for proper broadcasting
-                B_exp = B.permute(0, 1, 3, 2)  # (B, D, L, N)
-                
-                deltaB = (delta_sq_exp / 2.0 * B_exp +
-                          delta_cubed_exp / 6.0 * A_exp * B_exp +
-                          delta_4th_exp / 24.0 * A_sq_exp * B_exp +
-                          delta_5th_exp / 120.0 * A_cubed_exp * B_exp)
-                
-                deltaB_u = deltaB * u.unsqueeze(-1)
-    
-    elif discretization_method == "bilinear":
-        # Bilinear (Tustin) Transform - Correct stability-preserving formula:
-        # Ā = (I - ΔA/2)⁻¹(I + ΔA/2)
-        # B̄ = (I - ΔA/2)⁻¹ΔB
-        # This ensures stability: left half-plane maps to inside unit circle
-        
-        # Compute half_delta_A as a vector: (batch, dim, seqlen, dstate)
-        half_delta_A_vec = torch.einsum('bdl,dn->bdln', delta, A) * 0.5
-        
-        # Convert to diagonal matrix: (batch, dim, seqlen, dstate, dstate)
-        # Each (b, d, l) gets a diagonal matrix with half_delta_A_vec[b, d, l, :] on the diagonal
-        half_delta_A = torch.diag_embed(half_delta_A_vec, dim1=-2, dim2=-1)
-        
-        # Create identity matrix with correct shape: (1, 1, 1, dstate, dstate) for broadcasting
-        I = torch.eye(dstate, device=A.device, dtype=A.dtype).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-        # I now has shape (1, 1, 1, dstate, dstate) which will broadcast to (batch, dim, seqlen, dstate, dstate)
-        
-        I_plus_half_delta_A = I + half_delta_A   # (I + ΔA/2)
-        I_minus_half_delta_A = I - half_delta_A  # (I - ΔA/2)
-        
-        # Compute (I - A*delta/2)^-1 using batch matrix inverse (CORRECTED: invert I - ΔA/2)
-        I_minus_half_delta_A_reshaped = rearrange(I_minus_half_delta_A, 'b d l n1 n2 -> (b d l) n1 n2')
-        I_minus_half_delta_A_inv_reshaped = torch.inverse(I_minus_half_delta_A_reshaped)
-        I_minus_half_delta_A_inv = rearrange(I_minus_half_delta_A_inv_reshaped, '(b d l) n1 n2 -> b d l n1 n2', 
-                                          b=batch, d=dim, l=delta.size(2))
-        
-        # A_d = (I - A*delta/2)^-1 * (I + A*delta/2) (CORRECTED order)
-        deltaA = torch.matmul(I_minus_half_delta_A_inv, I_plus_half_delta_A)
-        
-        # Compute B_d = (I - ΔA/2)⁻¹ΔB
-        # For bilinear: B_d = (I - ΔA/2)⁻¹ * (delta * B) where delta is scalar and B is vector
-        if not is_variable_B:
-            # B is (dim, dstate)
-            # For each (b, d, l), we have delta[b, d, l] (scalar) and B[d, :] (vector of shape dstate)
-            # delta * B should be (batch, dim, seqlen, dstate, 1)
-            # Expand B: (dim, dstate) -> (1, dim, 1, dstate, 1)
-            B_expanded = B.unsqueeze(0).unsqueeze(0).unsqueeze(-1)  # (1, dim, 1, dstate, 1)
-            # Expand delta: (batch, dim, seqlen) -> (batch, dim, seqlen, 1, 1)
-            delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
-            # delta * B: (batch, dim, seqlen, 1, 1) * (1, dim, 1, dstate, 1) -> (batch, dim, seqlen, dstate, 1)
-            # But we need to broadcast properly - B should be (1, dim, 1, dstate, 1) and delta (batch, dim, seqlen, 1, 1)
-            # Actually, we need to match dimensions: B[d, :] for each d, so B should be (1, dim, 1, dstate, 1)
-            delta_B = delta_expanded * B_expanded  # (batch, dim, seqlen, dstate, 1)
-            # Now multiply by inverse: (I - ΔA/2)⁻¹ * (delta * B)
-            deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_B)  # (batch, dim, seqlen, dstate, 1)
-            # Multiply by u: u has shape (batch, dim, seqlen), expand to (batch, dim, seqlen, 1)
-            deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
+                deltaB = (
+                    delta_sq_exp / 2.0 * B_exp
+                    + delta_cubed_exp / 6.0 * A_exp * B_exp
+                    + delta_4th_exp / 24.0 * A_sq_exp * B_exp
+                    + delta_5th_exp / 120.0 * A_cubed_exp * B_exp
+                )
+                deltaB_u[:, :, t0:t1] = deltaB * u_sl.unsqueeze(-1)
         else:
-            # Handle variable B case 
             if B.dim() == 3:
-                # B is (batch, dstate, seqlen) -> transpose to (batch, seqlen, dstate)
-                # Need to expand to (batch, dim, seqlen, dstate, 1)
-                B_transposed = B.permute(0, 2, 1)  # (batch, seqlen, dstate)
-                B_expanded = B_transposed.unsqueeze(1).unsqueeze(-1)  # (batch, 1, seqlen, dstate, 1)
-                # Expand to match dim dimension
-                B_expanded = repeat(B_expanded, 'b 1 l n 1 -> b d l n 1', d=dim)
-                delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
-                delta_B = delta_expanded * B_expanded  # (batch, dim, seqlen, dstate, 1)
-                deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_B)
-                deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
+                for t0 in range(0, L, chunk):
+                    t1 = min(t0 + chunk, L)
+                    d_sl = delta[:, :, t0:t1]
+                    u_sl = u[:, :, t0:t1]
+                    B_sl = B[:, :, t0:t1]
+                    delta_sq = d_sl ** 2
+                    delta_cubed = d_sl ** 3
+                    delta_4th = d_sl ** 4
+                    delta_5th = d_sl ** 5
+                    delta_sq_exp = delta_sq.unsqueeze(-1)
+                    delta_cubed_exp = delta_cubed.unsqueeze(-1)
+                    delta_4th_exp = delta_4th.unsqueeze(-1)
+                    delta_5th_exp = delta_5th.unsqueeze(-1)
+                    B_exp = B_sl.unsqueeze(1).permute(0, 1, 3, 2)
+                    deltaB = (
+                        delta_sq_exp / 2.0 * B_exp
+                        + delta_cubed_exp / 6.0 * A_exp * B_exp
+                        + delta_4th_exp / 24.0 * A_sq_exp * B_exp
+                        + delta_5th_exp / 120.0 * A_cubed_exp * B_exp
+                    )
+                    deltaB_u[:, :, t0:t1] = deltaB * u_sl.unsqueeze(-1)
             else:
-                # B is (batch, n_groups, dstate, seqlen)
+                B_rep = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
+                for t0 in range(0, L, chunk):
+                    t1 = min(t0 + chunk, L)
+                    d_sl = delta[:, :, t0:t1]
+                    u_sl = u[:, :, t0:t1]
+                    B_sl = B_rep[:, :, :, t0:t1].permute(0, 1, 3, 2)
+                    delta_sq = d_sl ** 2
+                    delta_cubed = d_sl ** 3
+                    delta_4th = d_sl ** 4
+                    delta_5th = d_sl ** 5
+                    delta_sq_exp = delta_sq.unsqueeze(-1)
+                    delta_cubed_exp = delta_cubed.unsqueeze(-1)
+                    delta_4th_exp = delta_4th.unsqueeze(-1)
+                    delta_5th_exp = delta_5th.unsqueeze(-1)
+                    deltaB = (
+                        delta_sq_exp / 2.0 * B_sl
+                        + delta_cubed_exp / 6.0 * A_exp * B_sl
+                        + delta_4th_exp / 24.0 * A_sq_exp * B_sl
+                        + delta_5th_exp / 120.0 * A_cubed_exp * B_sl
+                    )
+                    deltaB_u[:, :, t0:t1] = deltaB * u_sl.unsqueeze(-1)
+
+    elif discretization_method == "bilinear":
+        # Bilinear (Tustin): Ā = (I - ΔA/2)⁻¹(I + ΔA/2), B̄u = (I - ΔA/2)⁻¹(ΔB) u.
+        # A is diagonal in the state dimension → per-(b,d,l,n) scalars; avoid matmul/inverse.
+        half_delta_A_vec = torch.einsum('bdl,dn->bdln', delta, A) * 0.5
+        denom = 1.0 - half_delta_A_vec
+        denom = _stable_tustin_denominator(denom)
+        deltaA = (1.0 + half_delta_A_vec) / denom
+        deltaA = torch.clamp(deltaA, min=-1e10, max=1e10)
+
+        if not is_variable_B:
+            delta_B_vec = torch.einsum('bdl,dn->bdln', delta, B)
+            deltaB_u = (delta_B_vec / denom) * u.unsqueeze(-1)
+        else:
+            if B.dim() == 3:
+                # B is (B, N, L)
+                B_bdln = B.unsqueeze(1).permute(0, 1, 3, 2)
+                delta_B_vec = delta.unsqueeze(-1) * B_bdln
+                deltaB_u = (delta_B_vec / denom) * u.unsqueeze(-1)
+            else:
                 B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
-                # B is now (batch, dim, dstate, seqlen) -> permute to (batch, dim, seqlen, dstate)
-                B_permuted = B.permute(0, 1, 3, 2)  # (batch, dim, seqlen, dstate)
-                B_expanded = B_permuted.unsqueeze(-1)  # (batch, dim, seqlen, dstate, 1)
-                delta_expanded = delta.unsqueeze(-1).unsqueeze(-1)  # (batch, dim, seqlen, 1, 1)
-                delta_B = delta_expanded * B_expanded  # (batch, dim, seqlen, dstate, 1)
-                deltaB = torch.matmul(I_minus_half_delta_A_inv, delta_B)
-                deltaB_u = deltaB.squeeze(-1) * u.unsqueeze(-1)  # (batch, dim, seqlen, dstate)
-    
+                B_bdln = B.permute(0, 1, 3, 2)
+                delta_B_vec = delta.unsqueeze(-1) * B_bdln
+                deltaB_u = (delta_B_vec / denom) * u.unsqueeze(-1)
+
     elif discretization_method == "poly":
         # Polynomial Interpolation (Non-Causal, Bidirectional):
         # B̄ = A⁻¹(exp(AΔ)-I)B + ½A⁻²(exp(AΔ)-I-AΔ)B

@@ -13,6 +13,7 @@ from copy import deepcopy
 from dataclasses import is_dataclass
 from typing import List, Tuple, Union
 import cloudpickle
+import torch
 import yaml
 from omegaconf import DictConfig, ListConfig, OmegaConf, SCMode
 
@@ -69,6 +70,24 @@ def _visit_dict_config(cfg, func):
     elif isinstance(cfg, ListConfig):
         for v in cfg:
             _visit_dict_config(v, func)
+
+
+def _replace_torch_dtypes_for_yaml_save(cfg):
+    """In-place: torch.dtype values break yaml.dump / yaml.unsafe_load round-trip; stringify for logs."""
+    if isinstance(cfg, DictConfig):
+        for k in list(cfg.keys()):
+            v = cfg[k]
+            if isinstance(v, (DictConfig, ListConfig)):
+                _replace_torch_dtypes_for_yaml_save(v)
+            elif isinstance(v, torch.dtype):
+                cfg[k] = str(v)
+    elif isinstance(cfg, ListConfig):
+        for i in range(len(cfg)):
+            v = cfg[i]
+            if isinstance(v, (DictConfig, ListConfig)):
+                _replace_torch_dtypes_for_yaml_save(v)
+            elif isinstance(v, torch.dtype):
+                cfg[i] = str(v)
 
 
 def _validate_py_syntax(filename):
@@ -298,6 +317,7 @@ class LazyConfig:
 
             # not necessary, but makes yaml looks nicer
             _visit_dict_config(cfg, _replace_type_by_name)
+            _replace_torch_dtypes_for_yaml_save(cfg)
 
         save_pkl = False
         try:

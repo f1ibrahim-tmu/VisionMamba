@@ -135,6 +135,7 @@ def do_train(args, cfg):
     model = create_ddp_model(model, **cfg.train.ddp)
     if cfg.train.amp.enabled:
         amp_precision = getattr(cfg.train.amp, "precision", torch.float16)
+        logger.info("AMP enabled with precision=%s", amp_precision)
         trainer = AMPTrainer(model, train_loader, optim, precision=amp_precision)
     else:
         trainer = SimpleTrainer(model, train_loader, optim)

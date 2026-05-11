@@ -16,7 +16,7 @@ embed_dim, depth, num_heads, dp = 768, 24, 24, 0.1
 # Creates Simple Feature Pyramid from ViT backbone
 model.backbone = L(SimpleFeaturePyramid)(
     net=L(VisionMambaDet)(  # Single-scale ViT backbone
-        img_size=1024,
+        img_size=896,
         patch_size=16,
         embed_dim=embed_dim,
         depth=depth,
@@ -39,7 +39,7 @@ model.backbone = L(SimpleFeaturePyramid)(
     scale_factors=(4.0, 2.0, 1.0, 0.5),
     top_block=L(LastLevelMaxPool)(),
     norm="LN",
-    square_pad=1024,
+    square_pad=896,
 )
 
 model.roi_heads.box_head.conv_norm = model.roi_heads.mask_head.conv_norm = "LN"

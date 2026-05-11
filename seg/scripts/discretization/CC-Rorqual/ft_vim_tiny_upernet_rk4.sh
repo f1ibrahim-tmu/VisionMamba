@@ -72,7 +72,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run --standalone --npro
     --work-dir ${WORK_DIR} \
     --options model.backbone.pretrained=${PRETRAIN_CKPT} \
              model.backbone.init_backward_from_forward=${INIT_BACKWARD_FROM_FORWARD} \
-             train_dataloader.batch_size=4 \
+             train_dataloader.batch_size=2 \
              model.backbone.if_bimamba=True \
              model.backbone.bimamba_type=v2 \
              model.backbone.discretization_method=rk4 \

@@ -370,23 +370,16 @@ class Mamba(nn.Module):
                 dA_minus_I_div_A = (dA - 1.0) / A_expanded
                 dB = torch.einsum('bdn,bn->bdn', dA_minus_I_div_A, B)
             elif self.discretization_method == "bilinear":
-                # Bilinear (Tustin) Transform
-                half_dt_A = (dt.unsqueeze(-1) * A.unsqueeze(0)) * 0.5  # (batch, d_inner, d_state)
-                I = torch.eye(self.d_state, device=A.device).unsqueeze(0).unsqueeze(0)  # (1, 1, d_state, d_state)
-                I_plus_half_dt_A = I + half_dt_A.unsqueeze(-1) * torch.eye(self.d_state, device=A.device).unsqueeze(0).unsqueeze(0)
-                I_minus_half_dt_A = I - half_dt_A.unsqueeze(-1) * torch.eye(self.d_state, device=A.device).unsqueeze(0).unsqueeze(0)
-                
-                # Compute (I + A*dt/2)^-1
-                I_plus_half_dt_A_inv = torch.inverse(I_plus_half_dt_A.reshape(-1, self.d_state, self.d_state))
-                I_plus_half_dt_A_inv = I_plus_half_dt_A_inv.reshape(dt.shape[0], -1, self.d_state, self.d_state)
-                
-                # A_d = (I + A*dt/2)^-1 * (I - A*dt/2)
-                dA_matrix = torch.matmul(I_plus_half_dt_A_inv, I_minus_half_dt_A)
-                dA = dA_matrix.diagonal(dim1=-2, dim2=-1)  # Extract diagonal elements
-                
-                # B_d = (I + A*dt/2)^-1 * dt * B
-                dB_matrix = torch.matmul(I_plus_half_dt_A_inv, dt.unsqueeze(-1).unsqueeze(-1) * B.unsqueeze(-1))
-                dB = dB_matrix.squeeze(-1)
+                # Bilinear (Tustin), diagonal A — matches selective_scan_ref (invert I - ΔA/2).
+                half_dt_A = (dt.unsqueeze(-1) * A.unsqueeze(0)) * 0.5
+                denom = 1.0 - half_dt_A
+                dtype_r = denom.real.dtype if denom.is_complex() else denom.dtype
+                eps = float(torch.finfo(dtype_r).eps ** 0.5)
+                sg = torch.sgn(denom)
+                sg = torch.where(sg.abs() == 0, torch.ones_like(sg), sg)
+                denom = torch.where(denom.abs() < eps, sg * eps, denom)
+                dA = (1.0 + half_dt_A) / denom
+                dB = (dt.unsqueeze(-1) * B) / denom
             elif self.discretization_method == "rk4":
                 # Runge-Kutta 4th Order
                 # Calculate A^2 and A^3 for RK4 coefficients

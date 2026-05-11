@@ -2,8 +2,8 @@ import detectron2.data.transforms as T
 from detectron2 import model_zoo
 from detectron2.config import LazyCall as L
 
-# Data using LSJ
-image_size = 1024
+# Data using LSJ (896 aligned with ViMDet backbone img_size / FPN square_pad for lower VRAM at patch16)
+image_size = 896
 dataloader = model_zoo.get_config("common/data/coco.py").dataloader
 dataloader.train.mapper.augmentations = [
     L(T.RandomFlip)(horizontal=True),  # flip first
